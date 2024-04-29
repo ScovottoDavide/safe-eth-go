@@ -2,6 +2,7 @@ package eth
 
 import (
 	"fmt"
+	"math/big"
 	"net/url"
 )
 
@@ -28,4 +29,17 @@ func (uri *URI) isValid() bool {
 
 func (uri *URI) GetAddress() string {
 	return uri.address
+}
+
+type Network struct {
+	chainId int
+}
+
+type TxSpeed struct {
+	speed int
+}
+
+type EIP1559EstimatedGas struct {
+	Reward  big.Int
+	BaseFee big.Int
 }
