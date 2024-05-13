@@ -37,4 +37,38 @@ func main() {
 		panic(err)
 	}
 	fmt.Println(address)
+
+	nonce, err := ethereum_client.GetNonceForAccount(*address, "latest")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Nonce: ", nonce)
+
+	to_address, err := eth.StringToAddress("0x63f57569bC23c52165A98144D896a2AFC6fF8DFA")
+	if err != nil {
+		panic(err)
+	}
+	gas_price, err := ethereum_client.GasPrice()
+	if err != nil {
+		panic(err)
+	}
+
+	amount_to_transfer := eth.ToWei(0.5, 18)
+	estimated_gas, err := ethereum_client.EstimateGas(*address, to_address, 0, gas_price, nil, nil, amount_to_transfer, nil, nil, nil, nil)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Estimated gas for transferring ", amount_to_transfer, "(", eth.ToDecimal(amount_to_transfer, 18), ")", ": ", estimated_gas)
+
+	txHash, err := ethereum_client.SendEthTo(
+		HARDHAT_S_KEY0,
+		to_address,
+		gas_price,
+		amount_to_transfer,
+		estimated_gas,
+	)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(txHash)
 }

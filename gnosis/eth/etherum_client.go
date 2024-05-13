@@ -13,7 +13,7 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
-	// ethRpc "github.com/ethereum/go-ethereum/rpc"
+	"github.com/ethereum/go-ethereum/rpc"
 )
 
 type EthereumClient struct {
@@ -88,6 +88,10 @@ func (ethereumClient *EthereumClient) GetNonceForAccount(account common.Address,
 		context.Background(), &result, "eth_getTransactionCount", account, blockIdentifier,
 	)
 	return uint64(result), err
+}
+
+func (ethereumClient *EthereumClient) GasPrice() (*big.Int, error) {
+	return ethereumClient.ethereumClient.SuggestGasPrice(context.Background())
 }
 
 func AddressFromPrivKey(s_key_hex []byte) (*common.Address, error) {
@@ -168,6 +172,160 @@ func (ethereumClient *EthereumClient) EstimateFeeEip1559(txSpeed TxSpeed) (*EIP1
 		BaseFee: *feeHistory.BaseFee[len(feeHistory.BaseFee)-1],
 	}
 	return estimatedGas, nil
+}
+
+func (ethereumClient *EthereumClient) SetEip1559Fee(msg *ethereum.CallMsg, txSpeed TxSpeed) {
+	eip1559_estimated_gas, err := ethereumClient.EstimateFeeEip1559(txSpeed)
+	if err != nil {
+		panic(err)
+	}
+	msg.GasFeeCap = &eip1559_estimated_gas.BaseFee
+	msg.GasTipCap = &eip1559_estimated_gas.Reward
+}
+
+func (ethereumClient *EthereumClient) GetBalance(iaddress interface{}) (*big.Int, error) {
+	address := new(common.Address)
+	err := error(nil)
+	switch v := iaddress.(type) {
+	case string:
+		address, err = StringToAddress(v)
+		if err != nil {
+			return nil, err
+		}
+	case *common.Address:
+		address = v
+	case common.Address:
+		*address = v
+	}
+	return ethereumClient.ethereumClient.BalanceAt(context.Background(), *address, nil)
+}
+
+func (ethereumClient *EthereumClient) GetTransaction(txHash string) (*types.Transaction, bool, error) {
+	_, err := hexutil.Decode(txHash)
+	if err != nil {
+		return nil, false, err
+	}
+	ethTxHash := common.HexToHash(txHash)
+	tx, isPending, err := ethereumClient.ethereumClient.TransactionByHash(context.Background(), ethTxHash)
+	if err != nil {
+		return nil, false, err
+	}
+	return tx, isPending, nil
+}
+
+func (ethereumClient *EthereumClient) GetTransactions(txHashes []string) ([]*batcthedTransactionResult, error) {
+	if len(txHashes) == 0 {
+		return nil, errors.New("txHashes list is empty")
+	}
+	transactions := make([]*rpcTransaction, len(txHashes))
+	reqs := make([]rpc.BatchElem, len(txHashes))
+	for i, txHash := range txHashes {
+		_, err := hexutil.Decode(txHash)
+		if err != nil {
+			return nil, err
+		}
+		ethTxHash := common.HexToHash(txHash)
+		fmt.Println("hash: ", ethTxHash)
+		reqs[i] = rpc.BatchElem{
+			Method: "eth_getTransactionByHash",
+			Args:   []interface{}{ethTxHash},
+			Result: &transactions[i].Tx,
+		}
+	}
+	if err := ethereumClient.ethereumClient.Client().BatchCallContext(context.Background(), reqs); err != nil {
+		return nil, err
+	}
+	for i := range reqs {
+		if reqs[i].Error != nil {
+			return nil, reqs[i].Error
+		}
+		if transactions[i].Tx == nil {
+			return nil, fmt.Errorf("%d, got null transaction for transaction with hash %s", i, common.HexToHash(txHashes[i]))
+		}
+	}
+
+	result := make([]*batcthedTransactionResult, len(transactions))
+	for _, tx := range transactions {
+		tx_result := batcthedTransactionResult{
+			Tx:        tx.Tx,
+			IsPending: tx.BlockNumber == nil,
+		}
+		result = append(result, &tx_result)
+		fmt.Println("chain id ", tx.Tx.ChainId())
+		fmt.Println("cost (value + fees)", tx.Tx.Cost())
+		fmt.Println("data ", tx.Tx.Data())
+		fmt.Println("gas ", tx.Tx.Gas())
+		fmt.Println("gas price ", tx.Tx.GasPrice())
+		fmt.Println("hash ", tx.Tx.Hash())
+		fmt.Println("value ", tx.Tx.Value())
+	}
+	return result, nil
+}
+
+func (ethereumClient *EthereumClient) SendUnsignedTransaction(
+	iprivateKey interface{},
+	tx *types.Transaction,
+) (string, error) {
+	privateKey, err := GetCryptoPrivateKey(iprivateKey)
+	if err != nil {
+		return "", err
+	}
+
+	R, S, V := tx.RawSignatureValues()
+	if (V.Int64() != 0) || (R.Int64() != 0) || (S.Int64() != 0) {
+		return "", fmt.Errorf("transaction seems to have at least one signature value (v, r, s) filled")
+	}
+	chainId, err := ethereumClient.GetChainId()
+	if err != nil {
+		return "", err
+	}
+
+	signedTx, err := types.SignTx(tx, types.NewCancunSigner(big.NewInt(int64(chainId))), privateKey)
+	if err != nil {
+		return "", err
+	}
+	err = ethereumClient.ethereumClient.SendTransaction(context.Background(), signedTx)
+	if err != nil {
+		return "", err
+	}
+	return signedTx.Hash().Hex(), nil
+
+}
+
+// func (ethereumClient *EthereumClient) SendSignedTransaction(
+// 	tx *types.TxData,
+// 	retry bool,
+// 	blockIdentifier string,
+// ) {
+
+// }
+
+func (ethereumClient *EthereumClient) SendEthTo(
+	privateKey string,
+	to *common.Address,
+	gasPrice *big.Int,
+	value *big.Int,
+	gas uint64,
+) (string, error) {
+	address, err := AddressFromPrivKey(hexutil.MustDecode(privateKey))
+	if err != nil {
+		return "", err
+	}
+	nonce, err := ethereumClient.GetNonceForAccount(*address, "latest")
+	if err != nil {
+		return "", err
+	}
+	tx := types.NewTx(&types.LegacyTx{
+		Nonce:    nonce,
+		GasPrice: gasPrice,
+		Gas:      gas,
+		To:       to,
+		Value:    value,
+		Data:     nil,
+		// V:        nil, R: nil, S: nil,
+	})
+
+	return ethereumClient.SendUnsignedTransaction(privateKey, tx)
 }
 
 //func (etheruemClient *EthereumClient) RawBatchRequest() {

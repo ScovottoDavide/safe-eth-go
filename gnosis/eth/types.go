@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 )
 
 type URI struct {
@@ -42,4 +45,20 @@ type TxSpeed struct {
 type EIP1559EstimatedGas struct {
 	Reward  big.Int
 	BaseFee big.Int
+}
+
+// from ethclient
+type rpcTransaction struct {
+	Tx *types.Transaction
+	txExtraInfo
+}
+type txExtraInfo struct {
+	BlockNumber *string         `json:"blockNumber,omitempty"`
+	BlockHash   *common.Hash    `json:"blockHash,omitempty"`
+	From        *common.Address `json:"from,omitempty"`
+}
+
+type batcthedTransactionResult struct {
+	Tx        *types.Transaction
+	IsPending bool
 }
