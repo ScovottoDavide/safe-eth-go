@@ -9,7 +9,7 @@ import (
 func main() {
 	ethereum_client := safeethgo.NewEthereumClient("http://localhost:8545")
 
-	tx, isPending, err := ethereum_client.GetTransaction("0xec665062d20ecfd8f4d4f2764ba967dc9220893bc64ddc52622c0c0d8d96cc1e")
+	tx, isPending, err := ethereum_client.GetTransaction("0x5838d8d782178bbebef1b51922244674c883eabe85d3e634f446a8bc5742dd71")
 	if err != nil {
 		panic(err)
 	}
@@ -24,10 +24,8 @@ func main() {
 
 	txs, err := ethereum_client.GetTransactions(
 		[]string{
-			"0x03b542a2028ef4271ea6fe37ec2f86421a0df3bbddf9b4f2834c864391b9889b",
-			"0xa686543e1bbe8d7cfd5a4a8f299a9a1dd371ec7df322d3c25370baf43f035cd8",
-			"0x9b452aee9d436f3376beb3f8b92e467c63446770e38a574722ea1f28d0c1debb",
-			"0xec665062d20ecfd8f4d4f2764ba967dc9220893bc64ddc52622c0c0d8d96cc1e",
+			"0x5838d8d782178bbebef1b51922244674c883eabe85d3e634f446a8bc5742dd71",
+			"0xf545d5220b5e3493238b3e4811810fb733996b02f20eb0683dbcb88be01f9558",
 		})
 	if err != nil {
 		panic(err)

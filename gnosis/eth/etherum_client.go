@@ -220,16 +220,14 @@ func (ethereumClient *EthereumClient) GetTransactions(txHashes []string) ([]*bat
 	transactions := make([]*rpcTransaction, len(txHashes))
 	reqs := make([]rpc.BatchElem, len(txHashes))
 	for i, txHash := range txHashes {
-		_, err := hexutil.Decode(txHash)
-		if err != nil {
+		if _, err := hexutil.Decode(txHash); err != nil {
 			return nil, err
 		}
 		ethTxHash := common.HexToHash(txHash)
-		fmt.Println("hash: ", ethTxHash)
 		reqs[i] = rpc.BatchElem{
 			Method: "eth_getTransactionByHash",
 			Args:   []interface{}{ethTxHash},
-			Result: &transactions[i].Tx,
+			Result: &transactions[i],
 		}
 	}
 	if err := ethereumClient.ethereumClient.Client().BatchCallContext(context.Background(), reqs); err != nil {
@@ -239,25 +237,17 @@ func (ethereumClient *EthereumClient) GetTransactions(txHashes []string) ([]*bat
 		if reqs[i].Error != nil {
 			return nil, reqs[i].Error
 		}
-		if transactions[i].Tx == nil {
-			return nil, fmt.Errorf("%d, got null transaction for transaction with hash %s", i, common.HexToHash(txHashes[i]))
+		if transactions[i] == nil {
+			return nil, fmt.Errorf("got null transaction for transaction with hash %s", common.HexToHash(txHashes[i]))
 		}
 	}
 
 	result := make([]*batcthedTransactionResult, len(transactions))
-	for _, tx := range transactions {
-		tx_result := batcthedTransactionResult{
-			Tx:        tx.Tx,
+	for i, tx := range transactions {
+		result[i] = &batcthedTransactionResult{
+			Tx:        tx.tx,
 			IsPending: tx.BlockNumber == nil,
 		}
-		result = append(result, &tx_result)
-		fmt.Println("chain id ", tx.Tx.ChainId())
-		fmt.Println("cost (value + fees)", tx.Tx.Cost())
-		fmt.Println("data ", tx.Tx.Data())
-		fmt.Println("gas ", tx.Tx.Gas())
-		fmt.Println("gas price ", tx.Tx.GasPrice())
-		fmt.Println("hash ", tx.Tx.Hash())
-		fmt.Println("value ", tx.Tx.Value())
 	}
 	return result, nil
 }

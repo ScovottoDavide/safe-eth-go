@@ -2,6 +2,7 @@ package eth
 
 import (
 	"crypto/ecdsa"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"reflect"
@@ -140,4 +141,11 @@ func GetCryptoPrivateKey(iprivateKey interface{}) (*ecdsa.PrivateKey, error) {
 		}
 	}
 	return privateKey, nil
+}
+
+func (tx *rpcTransaction) UnmarshalJSON(msg []byte) error {
+	if err := json.Unmarshal(msg, &tx.tx); err != nil {
+		return err
+	}
+	return json.Unmarshal(msg, &tx.txExtraInfo)
 }
