@@ -184,25 +184,15 @@ func (ethereumClient *EthereumClient) SetEip1559Fee(msg *ethereum.CallMsg, txSpe
 }
 
 func (ethereumClient *EthereumClient) GetBalance(iaddress interface{}) (*big.Int, error) {
-	address := new(common.Address)
-	err := error(nil)
-	switch v := iaddress.(type) {
-	case string:
-		address, err = StringToAddress(v)
-		if err != nil {
-			return nil, err
-		}
-	case *common.Address:
-		address = v
-	case common.Address:
-		*address = v
+	address, err := TryAnyToAddress(iaddress)
+	if err != nil {
+		return nil, err
 	}
 	return ethereumClient.ethereumClient.BalanceAt(context.Background(), *address, nil)
 }
 
 func (ethereumClient *EthereumClient) GetTransaction(txHash string) (*types.Transaction, bool, error) {
-	_, err := hexutil.Decode(txHash)
-	if err != nil {
+	if _, err := hexutil.Decode(txHash); err != nil {
 		return nil, false, err
 	}
 	ethTxHash := common.HexToHash(txHash)
@@ -252,10 +242,206 @@ func (ethereumClient *EthereumClient) GetTransactions(txHashes []string) ([]*bat
 	return result, nil
 }
 
-func (ethereumClient *EthereumClient) SendUnsignedTransaction(
-	iprivateKey interface{},
-	tx *types.Transaction,
-) (string, error) {
+func (ethereumClient *EthereumClient) GetReceipt(txHash string) (*types.Receipt, error) {
+	if _, err := hexutil.Decode(txHash); err != nil {
+		return nil, err
+	}
+	ethTxHash := common.HexToHash(txHash)
+	return ethereumClient.ethereumClient.TransactionReceipt(context.Background(), ethTxHash)
+}
+
+func (ethereumClient *EthereumClient) GetReceipts(txHashes []string) ([]*types.Receipt, error) {
+	if len(txHashes) == 0 {
+		return nil, errors.New("txHashes list is empty")
+	}
+	receipts := make([]*types.Receipt, len(txHashes))
+	reqs := make([]rpc.BatchElem, len(txHashes))
+	for i, txHash := range txHashes {
+		if _, err := hexutil.Decode(txHash); err != nil {
+			return nil, err
+		}
+		ethTxHash := common.HexToHash(txHash)
+		reqs[i] = rpc.BatchElem{
+			Method: "eth_getTransactionReceipt",
+			Args:   []interface{}{ethTxHash},
+			Result: &receipts[i],
+		}
+	}
+	if err := ethereumClient.ethereumClient.Client().BatchCallContext(context.Background(), reqs); err != nil {
+		return nil, err
+	}
+	for i := range reqs {
+		if reqs[i].Error != nil {
+			return nil, reqs[i].Error
+		}
+		if receipts[i] == nil {
+			return nil, fmt.Errorf("got null transaction for transaction with hash %s", common.HexToHash(txHashes[i]))
+		}
+	}
+
+	return receipts, nil
+}
+
+func (ethereumClient *EthereumClient) GetBlockByHash(txHash string, fullBlock bool) (*types.Block, *types.Header, error) {
+	if _, err := hexutil.Decode(txHash); err != nil {
+		return nil, nil, err
+	}
+	ethTxHash := common.HexToHash(txHash)
+	if fullBlock {
+		if block, err := ethereumClient.ethereumClient.BlockByHash(context.Background(), ethTxHash); err != nil {
+			return nil, nil, err
+		} else {
+			return block, nil, nil
+		}
+	} else {
+		if header, err := ethereumClient.ethereumClient.HeaderByHash(context.Background(), ethTxHash); err != nil {
+			return nil, nil, err
+		} else {
+			return nil, header, nil
+		}
+	}
+}
+
+func (ethereumClient *EthereumClient) GetBlockByNumber(blockNumber *big.Int, fullBlock bool) (*types.Block, *types.Header, error) {
+	if fullBlock {
+		if block, err := ethereumClient.ethereumClient.BlockByNumber(context.Background(), blockNumber); err != nil {
+			return nil, nil, err
+		} else {
+			return block, nil, nil
+		}
+	} else {
+		if header, err := ethereumClient.ethereumClient.HeaderByNumber(context.Background(), blockNumber); err != nil {
+			return nil, nil, err
+		} else {
+			return nil, header, nil
+		}
+	}
+}
+
+func (ethereumClient *EthereumClient) GetBlocksByHash(txHashes []string, fullBlock bool) ([]*types.Block, []*types.Header, error) {
+	if len(txHashes) == 0 {
+		return nil, nil, errors.New("txHashes list is empty")
+	}
+
+	if fullBlock {
+		blocks := make([]*types.Block, len(txHashes))
+		reqs := make([]rpc.BatchElem, len(txHashes))
+		for i, txHash := range txHashes {
+			if _, err := hexutil.Decode(txHash); err != nil {
+				return nil, nil, err
+			}
+			ethTxHash := common.HexToHash(txHash)
+			reqs[i] = rpc.BatchElem{
+				Method: "eth_getBlockByHash",
+				Args:   []interface{}{ethTxHash},
+				Result: &blocks[i],
+			}
+		}
+		if err := ethereumClient.ethereumClient.Client().BatchCallContext(context.Background(), reqs); err != nil {
+			return nil, nil, err
+		}
+		for i := range reqs {
+			if reqs[i].Error != nil {
+				return nil, nil, reqs[i].Error
+			}
+			if blocks[i] == nil {
+				return nil, nil, fmt.Errorf("got null block for hash %s", common.HexToHash(txHashes[i]))
+			}
+		}
+
+		return blocks, nil, nil
+	} else {
+		headers := make([]*types.Header, len(txHashes))
+		reqs := make([]rpc.BatchElem, len(txHashes))
+		for i, txHash := range txHashes {
+			if _, err := hexutil.Decode(txHash); err != nil {
+				return nil, nil, err
+			}
+			ethTxHash := common.HexToHash(txHash)
+			reqs[i] = rpc.BatchElem{
+				Method: "eth_getBlockByHash",
+				Args:   []interface{}{ethTxHash},
+				Result: &headers[i],
+			}
+		}
+		if err := ethereumClient.ethereumClient.Client().BatchCallContext(context.Background(), reqs); err != nil {
+			return nil, nil, err
+		}
+		for i := range reqs {
+			if reqs[i].Error != nil {
+				return nil, nil, reqs[i].Error
+			}
+			if headers[i] == nil {
+				return nil, nil, fmt.Errorf("got null block header for hash %s", common.HexToHash(txHashes[i]))
+			}
+		}
+
+		return nil, headers, nil
+	}
+}
+
+func (ethereumClient *EthereumClient) GetBlocksByNumber(blockNumbers []*big.Int, fullBlock bool) ([]*types.Block, []*types.Header, error) {
+	if len(blockNumbers) == 0 {
+		return nil, nil, errors.New("txHashes list is empty")
+	}
+
+	if fullBlock {
+		blocks := make([]*types.Block, len(blockNumbers))
+		reqs := make([]rpc.BatchElem, len(blockNumbers))
+		for i, blockNum := range blockNumbers {
+			reqs[i] = rpc.BatchElem{
+				Method: "eth_getBlockByHash",
+				Args:   []interface{}{blockNum},
+				Result: &blocks[i],
+			}
+		}
+		if err := ethereumClient.ethereumClient.Client().BatchCallContext(context.Background(), reqs); err != nil {
+			return nil, nil, err
+		}
+		for i := range reqs {
+			if reqs[i].Error != nil {
+				return nil, nil, reqs[i].Error
+			}
+			if blocks[i] == nil {
+				return nil, nil, fmt.Errorf("got null block for number %d", blockNumbers[i])
+			}
+		}
+		return blocks, nil, nil
+	} else {
+		headers := make([]*types.Header, len(blockNumbers))
+		reqs := make([]rpc.BatchElem, len(blockNumbers))
+		for i, blockNum := range blockNumbers {
+			reqs[i] = rpc.BatchElem{
+				Method: "eth_getBlockByHash",
+				Args:   []interface{}{blockNum},
+				Result: &headers[i],
+			}
+		}
+		if err := ethereumClient.ethereumClient.Client().BatchCallContext(context.Background(), reqs); err != nil {
+			return nil, nil, err
+		}
+		for i := range reqs {
+			if reqs[i].Error != nil {
+				return nil, nil, reqs[i].Error
+			}
+			if headers[i] == nil {
+				return nil, nil, fmt.Errorf("got null block header for number %d", blockNumbers[i])
+			}
+		}
+		return nil, headers, nil
+	}
+}
+
+func (ethereumClient *EthereumClient) IsContract(icontractAddress interface{}) (bool, error) {
+	address, err := TryAnyToAddress(icontractAddress)
+	if err != nil {
+		return false, err
+	}
+	code, err := ethereumClient.ethereumClient.CodeAt(context.Background(), *address, nil)
+	return len(code) > 0, err
+}
+
+func (ethereumClient *EthereumClient) SendUnsignedTransaction(iprivateKey interface{}, tx *types.Transaction) (string, error) {
 	privateKey, err := GetCryptoPrivateKey(iprivateKey)
 	if err != nil {
 		return "", err
@@ -279,7 +465,6 @@ func (ethereumClient *EthereumClient) SendUnsignedTransaction(
 		return "", err
 	}
 	return signedTx.Hash().Hex(), nil
-
 }
 
 // func (ethereumClient *EthereumClient) SendSignedTransaction(
