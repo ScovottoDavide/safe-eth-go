@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strconv"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -14,11 +15,14 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
+
+	cache "github.com/ScovottoDavide/g-local-storage"
 )
 
 type EthereumClient struct {
 	ethereumNodeUrl URI
 	ethereumClient  *ethclient.Client
+	localCache      *cache.LocalStorage
 }
 
 func EthereumClientInit(uri *URI) (*EthereumClient, error) {
@@ -36,9 +40,16 @@ func EthereumClientInit(uri *URI) (*EthereumClient, error) {
 	}
 	fmt.Println("Successfully connected to network with {address: ", uri.address, ", chainId: ", chain_id, "}")
 
+	config := cache.StorageConfig{
+		Expiration:      0, // if set to 0, items cache will never expire
+		Capacity:        100,
+		CleanupInterval: 0, // Cleanup runs in the background every hour
+	}
+
 	ethereum_client := &EthereumClient{
 		ethereumNodeUrl: *uri,
 		ethereumClient:  client,
+		localCache:      cache.New(config),
 	}
 	return ethereum_client, nil
 }
@@ -60,26 +71,42 @@ func (ethereumClient *EthereumClient) CurrentBlockNumber() (uint64, error) {
 }
 
 func (ethereumClient *EthereumClient) GetChainId() (int, error) {
-	chain_id, err := ethereumClient.ethereumClient.ChainID(context.Background())
-	if err != nil {
-		return Unknown.chainId, err
+	if item, hit := ethereumClient.localCache.Get(CHAIN_ID_CACHE_KEY); hit {
+		return strconv.Atoi(string(item.Value))
+	} else {
+		chain_id, err := ethereumClient.ethereumClient.ChainID(context.Background())
+		if err != nil {
+			return Unknown.chainId, err
+		}
+		ethereumClient.localCache.Set(CHAIN_ID_CACHE_KEY, chain_id.Bytes(), -1)
+		return int(chain_id.Int64()), nil
 	}
-	return int(chain_id.Int64()), nil
 }
 
 func (ethereumClient *EthereumClient) GetClientVersion() (string, error) {
-	var response string
-	err := ethereumClient.ethereumClient.Client().Call(&response, "web3_clientVersion")
-	if err != nil {
-		return "", err
+	if item, hit := ethereumClient.localCache.Get(W3_CLIENT_VERSION_CACHE_KEY); hit {
+		return string(item.Value), nil
+	} else {
+		var response string
+		err := ethereumClient.ethereumClient.Client().Call(&response, "web3_clientVersion")
+		if err != nil {
+			return "", err
+		}
+		ethereumClient.localCache.Set(W3_CLIENT_VERSION_CACHE_KEY, []byte(response), -1)
+		return response, nil
 	}
-	return response, nil
 }
 
 func (ethereumClient *EthereumClient) IsEip1559Supported() bool {
-	// hardhat node causes an os.exit() !!!
-	_, err := ethereumClient.ethereumClient.FeeHistory(context.Background(), 1, nil, make([]float64, 50))
-	return err == nil
+	if item, hit := ethereumClient.localCache.Get(IS_NETWORK_EIP_1559_CACHE_KEY); hit {
+		isEip1559Supported, _ := strconv.ParseBool(string(item.Value))
+		return isEip1559Supported
+	} else {
+		_, err := ethereumClient.ethereumClient.FeeHistory(context.Background(), 1, nil, make([]float64, 50))
+		isEip1559Supported := err == nil
+		ethereumClient.localCache.Set(IS_NETWORK_EIP_1559_CACHE_KEY, []byte(strconv.FormatBool(isEip1559Supported)), -1)
+		return isEip1559Supported
+	}
 }
 
 func (ethereumClient *EthereumClient) GetNonceForAccount(account common.Address, blockIdentifier string) (uint64, error) {

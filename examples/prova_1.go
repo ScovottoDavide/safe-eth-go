@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
-const HARDHAT_S_KEY0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+const S_KEY_0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 func main() {
 	ethereum_client := safeethgo.NewEthereumClient("http://localhost:8545")
@@ -31,8 +31,9 @@ func main() {
 	}
 	fmt.Println(clientVersion)
 
-	// fmt.Println(ethereum_client.IsEip1559Supported())
-	address, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	fmt.Println(ethereum_client.IsEip1559Supported())
+	fmt.Println(ethereum_client.IsEip1559Supported())
+	address, err := eth.AddressFromPrivKey(hexutil.MustDecode(S_KEY_0))
 	if err != nil {
 		panic(err)
 	}
@@ -61,7 +62,7 @@ func main() {
 	fmt.Println("Estimated gas for transferring ", amount_to_transfer, "(", eth.ToDecimal(amount_to_transfer, 18), ")", ": ", estimated_gas)
 
 	txHash, err := ethereum_client.SendEthTo(
-		HARDHAT_S_KEY0,
+		S_KEY_0,
 		to_address,
 		gas_price,
 		amount_to_transfer,

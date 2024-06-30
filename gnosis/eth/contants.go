@@ -17,3 +17,7 @@ const SIGNATURE_V_MAX_VALUE = 28
 
 const GAS_CALL_DATA_ZERO_BYTE = 4
 const GAS_CALL_DATA_BYTE = 16 // 68 before Istanbul
+
+const CHAIN_ID_CACHE_KEY = "chain_id"
+const W3_CLIENT_VERSION_CACHE_KEY = "web3_clientVersion"
+const IS_NETWORK_EIP_1559_CACHE_KEY = "IsEip1559Supported"
