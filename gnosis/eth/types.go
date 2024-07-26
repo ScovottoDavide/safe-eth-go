@@ -43,8 +43,8 @@ type TxSpeed struct {
 }
 
 type EIP1559EstimatedGas struct {
-	Reward  big.Int
-	BaseFee big.Int
+	Reward  *big.Int
+	BaseFee *big.Int
 }
 
 // from ethclient
@@ -61,4 +61,22 @@ type txExtraInfo struct {
 type batcthedTransactionResult struct {
 	Tx        *types.Transaction
 	IsPending bool
+}
+
+type multipleTxData struct {
+	constructorData []byte
+	initializerData []byte
+}
+
+func (m multipleTxData) toArray() [][]byte {
+	var arr [][]byte
+	if m.initializerData == nil {
+		arr = make([][]byte, 1)
+		arr[0] = m.constructorData
+	} else {
+		arr = make([][]byte, 2)
+		arr[0] = m.constructorData
+		arr[1] = m.initializerData
+	}
+	return arr
 }

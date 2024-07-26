@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -168,8 +169,8 @@ func (ethereumClient *EthereumClient) EstimateFeeEip1559(txSpeed TxSpeed) (*EIP1
 	}
 
 	estimatedGas := &EIP1559EstimatedGas{
-		Reward:  *feeHistory.Reward[0][0],
-		BaseFee: *feeHistory.BaseFee[len(feeHistory.BaseFee)-1],
+		Reward:  feeHistory.Reward[0][0],
+		BaseFee: feeHistory.BaseFee[len(feeHistory.BaseFee)-1],
 	}
 	return estimatedGas, nil
 }
@@ -179,8 +180,8 @@ func (ethereumClient *EthereumClient) SetEip1559Fee(msg *ethereum.CallMsg, txSpe
 	if err != nil {
 		panic(err)
 	}
-	msg.GasFeeCap = &eip1559_estimated_gas.BaseFee
-	msg.GasTipCap = &eip1559_estimated_gas.Reward
+	msg.GasFeeCap = eip1559_estimated_gas.BaseFee
+	msg.GasTipCap = eip1559_estimated_gas.Reward
 }
 
 func (ethereumClient *EthereumClient) GetBalance(iaddress interface{}) (*big.Int, error) {
@@ -265,31 +266,84 @@ func (ethereumClient *EthereumClient) GetTransactions(txHashes []string) ([]*bat
 func (ethereumClient *EthereumClient) SendUnsignedTransaction(
 	iprivateKey interface{},
 	tx *types.Transaction,
-) (string, error) {
+) (common.Hash, error) {
 	privateKey, err := GetCryptoPrivateKey(iprivateKey)
 	if err != nil {
-		return "", err
+		return common.Hash{}, err
 	}
 
 	R, S, V := tx.RawSignatureValues()
 	if (V.Int64() != 0) || (R.Int64() != 0) || (S.Int64() != 0) {
-		return "", fmt.Errorf("transaction seems to have at least one signature value (v, r, s) filled")
+		return common.Hash{}, fmt.Errorf("transaction seems to have at least one signature value (v, r, s) filled")
 	}
 	chainId, err := ethereumClient.GetChainId()
 	if err != nil {
-		return "", err
+		return common.Hash{}, err
 	}
 
 	signedTx, err := types.SignTx(tx, types.NewCancunSigner(big.NewInt(int64(chainId))), privateKey)
 	if err != nil {
-		return "", err
+		return common.Hash{}, err
 	}
 	err = ethereumClient.ethereumClient.SendTransaction(context.Background(), signedTx)
 	if err != nil {
-		return "", err
+		return common.Hash{}, err
 	}
-	return signedTx.Hash().Hex(), nil
+	return signedTx.Hash(), nil
+}
 
+func (ethereumClient *EthereumClient) BuildTransaction(
+	From common.Address, // the sender of the 'transaction'
+	To *common.Address, // the destination contract (nil for contract creation)
+	Gas uint64, // if 0, the call executes with near-infinite gas
+	GasPrice *big.Int, // wei <-> gas exchange ratio
+	GasFeeCap *big.Int, // EIP-1559 fee cap per gas.
+	GasTipCap *big.Int, // EIP-1559 tip per gas.
+	Value *big.Int, // amount of wei sent along with the call
+	Data []byte, // input data, usually an ABI-encoded contract method invocation
+	AccessList types.AccessList, // EIP-2930 access list.
+) (*types.Transaction, error) {
+	txType := types.DynamicFeeTxType
+	if GasFeeCap == nil && GasTipCap == nil {
+		txType = types.LegacyTxType
+	} else if (GasFeeCap == nil && GasTipCap != nil) || (GasFeeCap != nil && GasTipCap == nil) {
+		return nil, fmt.Errorf("one of GasFeeCap and GasTipCap is nil")
+	}
+
+	chainId, err := ethereumClient.GetChainId()
+	if err != nil {
+		return nil, err
+	}
+	nonce, err := ethereumClient.GetNonceForAccount(From, "pending")
+	if err != nil {
+		return nil, err
+	}
+	switch txType {
+	case types.DynamicFeeTxType:
+		transaction := types.NewTx(&types.DynamicFeeTx{
+			ChainID:    IntToBigInt(chainId),
+			Nonce:      nonce,
+			GasTipCap:  GasTipCap,
+			GasFeeCap:  GasFeeCap,
+			Gas:        Gas,
+			To:         To,
+			Value:      Value,
+			Data:       Data,
+			AccessList: AccessList,
+		})
+		return transaction, nil
+	case types.LegacyTxType:
+		transaction := types.NewTx(&types.LegacyTx{
+			Nonce:    nonce,
+			To:       To,
+			Value:    Value,
+			GasPrice: GasPrice,
+			Gas:      Gas,
+			Data:     Data,
+		})
+		return transaction, nil
+	}
+	return nil, fmt.Errorf("detected invalid transaction type. transaction build failed")
 }
 
 // func (ethereumClient *EthereumClient) SendSignedTransaction(
@@ -306,14 +360,14 @@ func (ethereumClient *EthereumClient) SendEthTo(
 	gasPrice *big.Int,
 	value *big.Int,
 	gas uint64,
-) (string, error) {
+) (common.Hash, error) {
 	address, err := AddressFromPrivKey(hexutil.MustDecode(privateKey))
 	if err != nil {
-		return "", err
+		return common.Hash{}, err
 	}
 	nonce, err := ethereumClient.GetNonceForAccount(*address, "latest")
 	if err != nil {
-		return "", err
+		return common.Hash{}, err
 	}
 	tx := types.NewTx(&types.LegacyTx{
 		Nonce:    nonce,
@@ -331,3 +385,131 @@ func (ethereumClient *EthereumClient) SendEthTo(
 //func (etheruemClient *EthereumClient) RawBatchRequest() {
 //	return
 //}
+
+// Returns a channel that blocks until the transaction is confirmed
+func (ethereumClient *EthereumClient) WaitTxConfirmed(hash common.Hash) <-chan bool {
+	ch := make(chan bool)
+	go func() {
+		for {
+			_, pending, _ := ethereumClient.GetTransaction(hash.Hex())
+			if !pending {
+				ch <- pending
+			}
+
+			time.Sleep(time.Millisecond * 500)
+		}
+	}()
+
+	return ch
+}
+
+func (ethereumClient *EthereumClient) GetTransactionReceipt(txHash common.Hash) *types.Receipt {
+	client := ethereumClient.ethereumClient
+	receipt, err := client.TransactionReceipt(context.Background(), txHash)
+	if err != nil {
+		return nil
+	}
+	return receipt
+}
+
+func (ethereumClient *EthereumClient) DeployAndInitializeContract(
+	iprivateKey interface{},
+	constructorAndInitializerData multipleTxData,
+	checkReceipt bool,
+	txSpeed TxSpeed,
+	value big.Int,
+) (*common.Hash, *types.Transaction, *common.Address, error) {
+	privateKey, err := GetCryptoPrivateKey(iprivateKey)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if constructorAndInitializerData.constructorData == nil {
+		return nil, nil, nil, fmt.Errorf("missing constructorData parameter")
+	}
+
+	deployerAddress, err := AddressFromPrivKey(privateKey.D.Bytes())
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	nonce, err := ethereumClient.GetNonceForAccount(*deployerAddress, "pending")
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	gasPrice, err := ethereumClient.GasPrice()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	estimatedEIP1559Gas := &EIP1559EstimatedGas{Reward: nil, BaseFee: nil}
+	if ethereumClient.IsEip1559Supported() {
+		estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(txSpeed)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	/*
+	* params to return
+	 */
+	newContractTx := new(types.Transaction)
+	newContractTxHash := new(common.Hash)
+	contractAddress := new(common.Address)
+	/**/
+
+	for index, data := range constructorAndInitializerData.toArray() {
+		estimatedGas, err := ethereumClient.EstimateGas(
+			*deployerAddress,
+			nil,
+			0,
+			gasPrice,
+			estimatedEIP1559Gas.BaseFee,
+			estimatedEIP1559Gas.Reward,
+			&value,
+			data,
+			nil,
+			nil,
+			nil,
+		)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		newContractTx, err = ethereumClient.BuildTransaction(
+			*deployerAddress,
+			nil,
+			estimatedGas,
+			gasPrice,
+			estimatedEIP1559Gas.BaseFee,
+			estimatedEIP1559Gas.Reward,
+			&value,
+			data,
+			nil,
+		)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+
+		txHash, err := ethereumClient.SendUnsignedTransaction(
+			privateKey, newContractTx,
+		)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		if index == 0 { // deploying contract
+			*contractAddress = MakeContractAddress(*deployerAddress, nonce)
+			newContractTxHash = &txHash
+		}
+
+		if checkReceipt {
+			isPending := <-ethereumClient.WaitTxConfirmed(txHash)
+			if !isPending {
+				return nil, nil, nil, fmt.Errorf("checkReceipt::Transaction should not be pending")
+			}
+			receipt := ethereumClient.GetTransactionReceipt(txHash)
+			if receipt == nil {
+				return nil, nil, nil, fmt.Errorf("checkReceipt::Got nil receipt")
+			}
+			if !isTransactionSuccessful(receipt) {
+				return nil, nil, nil, fmt.Errorf("checkReceipt::Got Unsucessful Receipt Status")
+			}
+		}
+	}
+	return newContractTxHash, newContractTx, contractAddress, nil
+}

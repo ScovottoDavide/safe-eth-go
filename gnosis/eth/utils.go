@@ -10,6 +10,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/shopspring/decimal"
 )
@@ -140,4 +141,16 @@ func GetCryptoPrivateKey(iprivateKey interface{}) (*ecdsa.PrivateKey, error) {
 		}
 	}
 	return privateKey, nil
+}
+
+func IntToBigInt(value int) *big.Int {
+	return big.NewInt(int64(value))
+}
+
+func MakeContractAddress(txFrom common.Address, txNonce uint64) common.Address {
+	return crypto.CreateAddress(txFrom, txNonce)
+}
+
+func isTransactionSuccessful(receipt *types.Receipt) bool {
+	return receipt.Status == types.ReceiptStatusSuccessful
 }
