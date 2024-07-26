@@ -49,7 +49,7 @@ type EIP1559EstimatedGas struct {
 
 // from ethclient
 type rpcTransaction struct {
-	Tx *types.Transaction
+	tx *types.Transaction
 	txExtraInfo
 }
 type txExtraInfo struct {

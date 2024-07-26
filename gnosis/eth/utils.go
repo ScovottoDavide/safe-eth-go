@@ -2,6 +2,7 @@ package eth
 
 import (
 	"crypto/ecdsa"
+	"encoding/json"
 	"errors"
 	"math/big"
 	"reflect"
@@ -125,6 +126,23 @@ func StringToAddress(address string) (*common.Address, error) {
 	return nil, errors.New("invalid address format")
 }
 
+func TryAnyToAddress(iaddress interface{}) (*common.Address, error) {
+	address := new(common.Address)
+	err := error(nil)
+	switch v := iaddress.(type) {
+	case string:
+		address, err = StringToAddress(v)
+		if err != nil {
+			return nil, err
+		}
+	case *common.Address:
+		address = v
+	case common.Address:
+		*address = v
+	}
+	return address, nil
+}
+
 func GetCryptoPrivateKey(iprivateKey interface{}) (*ecdsa.PrivateKey, error) {
 	privateKey := new(ecdsa.PrivateKey)
 	err := error(nil)
@@ -153,4 +171,11 @@ func MakeContractAddress(txFrom common.Address, txNonce uint64) common.Address {
 
 func isTransactionSuccessful(receipt *types.Receipt) bool {
 	return receipt.Status == types.ReceiptStatusSuccessful
+}
+
+func (tx *rpcTransaction) UnmarshalJSON(msg []byte) error {
+	if err := json.Unmarshal(msg, &tx.tx); err != nil {
+		return err
+	}
+	return json.Unmarshal(msg, &tx.txExtraInfo)
 }
