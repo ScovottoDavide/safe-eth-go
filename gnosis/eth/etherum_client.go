@@ -649,9 +649,13 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 	/**/
 
 	for index, data := range constructorAndInitializerData.toArray() {
+		var to *common.Address
+		if contractAddress.Hex() != NULL_ADDRESS {
+			to = contractAddress
+		}
 		estimatedGas, err := ethereumClient.EstimateGas(
 			*deployerAddress,
-			nil,
+			to,
 			0,
 			gasPrice,
 			estimatedEIP1559Gas.BaseFee,
@@ -667,7 +671,7 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 		}
 		newContractTx, err = ethereumClient.BuildTransaction(
 			*deployerAddress,
-			nil,
+			to,
 			estimatedGas,
 			gasPrice,
 			estimatedEIP1559Gas.BaseFee,

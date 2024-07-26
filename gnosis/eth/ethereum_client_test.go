@@ -93,7 +93,10 @@ func TestSendEthTo(t *testing.T) {
 	}
 	fmt.Println("Transaction confirmed")
 
-	receipt := ethereum_client.GetTransactionReceipt(txHash)
+	receipt, err := ethereum_client.GetReceipt(txHash.Hex())
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 	if receipt == nil {
 		t.Fatalf("receipt not found")
 	}
@@ -101,4 +104,8 @@ func TestSendEthTo(t *testing.T) {
 		t.Fatalf("Transaction failedddd")
 	}
 	fmt.Println("Transaction successful")
+}
+
+func TestDeployContract(t *testing.T) {
+	return
 }
