@@ -606,15 +606,6 @@ func (ethereumClient *EthereumClient) WaitTxConfirmed(hash common.Hash) <-chan b
 	return ch
 }
 
-func (ethereumClient *EthereumClient) GetTransactionReceipt(txHash common.Hash) *types.Receipt {
-	client := ethereumClient.ethereumClient
-	receipt, err := client.TransactionReceipt(context.Background(), txHash)
-	if err != nil {
-		return nil
-	}
-	return receipt
-}
-
 func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 	iprivateKey interface{},
 	constructorAndInitializerData multipleTxData,
@@ -705,7 +696,10 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 			if !isPending {
 				return nil, nil, nil, fmt.Errorf("checkReceipt::Transaction should not be pending")
 			}
-			receipt := ethereumClient.GetTransactionReceipt(txHash)
+			receipt, err := ethereumClient.GetReceipt(txHash.Hex())
+			if err != nil {
+				return nil, nil, nil, err
+			}
 			if receipt == nil {
 				return nil, nil, nil, fmt.Errorf("checkReceipt::Got nil receipt")
 			}
