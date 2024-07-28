@@ -117,9 +117,9 @@ func TestDeployContract(t *testing.T) {
 		t.Fatalf("error while unmarshalling file read at %s", abiPath)
 	}
 	hexBytecode := payload["bytecode"].(string)
-	bytecode := hexutil.Decode(hexBytecode)
+	// bytecode := hexutil.Decode(hexBytecode)
 
-	data := multipleTxData{}
+	// data := multipleTxData{}
 
-	ethereum_client.DeployAndInitializeContract(HARDHAT_S_KEY0)
+	// ethereum_client.DeployAndInitializeContract(HARDHAT_S_KEY0)
 }
