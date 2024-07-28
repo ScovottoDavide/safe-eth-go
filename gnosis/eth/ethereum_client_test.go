@@ -1,12 +1,13 @@
-package eth_test
+package eth
 
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 
-	safeethgo "github.com/ScovottoDavide/safe-eth-go"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -14,11 +15,9 @@ import (
 
 const HARDHAT_S_KEY0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
-var ethereum_client = safeethgo.NewEthereumClient("http://localhost:8545")
+var ethereum_client, _ = EthereumClientInit(NewURI("http://localhost:8545"))
 
 func TestEthClientInit(t *testing.T) {
-	ethereum_client := safeethgo.NewEthereumClient("http://localhost:8545")
-
 	uri := ethereum_client.GetUri()
 	fmt.Println(uri.GetAddress())
 
@@ -107,5 +106,20 @@ func TestSendEthTo(t *testing.T) {
 }
 
 func TestDeployContract(t *testing.T) {
-	return
+	abiPath := "../contracts/MyToken.json"
+	jsonFile, err := os.ReadFile(abiPath)
+	if err != nil {
+		t.Fatalf("cannot open file %s", abiPath)
+	}
+	var payload map[string]interface{}
+	err = json.Unmarshal(jsonFile, &payload)
+	if err != nil {
+		t.Fatalf("error while unmarshalling file read at %s", abiPath)
+	}
+	hexBytecode := payload["bytecode"].(string)
+	bytecode := hexutil.Decode(hexBytecode)
+
+	data := multipleTxData{}
+
+	ethereum_client.DeployAndInitializeContract(HARDHAT_S_KEY0)
 }
