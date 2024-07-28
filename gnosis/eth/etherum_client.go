@@ -73,7 +73,7 @@ func (ethereumClient *EthereumClient) CurrentBlockNumber() (uint64, error) {
 
 func (ethereumClient *EthereumClient) GetChainId() (int, error) {
 	if item, hit := ethereumClient.localCache.Get(CHAIN_ID_CACHE_KEY); hit {
-		return strconv.Atoi(string(item.Value))
+		return int(big.NewInt(0).SetBytes(item.Value).Uint64()), nil
 	} else {
 		chain_id, err := ethereumClient.ethereumClient.ChainID(context.Background())
 		if err != nil {
@@ -594,7 +594,9 @@ func (ethereumClient *EthereumClient) WaitTxConfirmed(hash common.Hash) <-chan b
 	ch := make(chan bool)
 	go func() {
 		for {
+			fmt.Println("Getting transaction ", hash.Hex())
 			_, pending, _ := ethereumClient.GetTransaction(hash.Hex())
+			fmt.Println("Is pending: ", pending)
 			if !pending {
 				ch <- pending
 			}
@@ -633,13 +635,13 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	estimatedEIP1559Gas := &EIP1559EstimatedGas{Reward: nil, BaseFee: nil}
-	if ethereumClient.IsEip1559Supported() {
-		estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(txSpeed)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-	}
+	// estimatedEIP1559Gas := &EIP1559EstimatedGas{Reward: nil, BaseFee: nil}
+	// if ethereumClient.IsEip1559Supported() {
+	// 	estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(txSpeed)
+	// 	if err != nil {
+	// 		return nil, nil, nil, err
+	// 	}
+	// }
 	/*
 	* params to return
 	 */
@@ -658,8 +660,8 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 			to,
 			0,
 			gasPrice,
-			estimatedEIP1559Gas.BaseFee,
-			estimatedEIP1559Gas.Reward,
+			nil,
+			nil,
 			&value,
 			data,
 			nil,
@@ -669,13 +671,14 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 		if err != nil {
 			return nil, nil, nil, err
 		}
+		fmt.Println("Estimated gas: ", estimatedGas)
 		newContractTx, err = ethereumClient.BuildTransaction(
 			*deployerAddress,
 			to,
 			estimatedGas,
 			gasPrice,
-			estimatedEIP1559Gas.BaseFee,
-			estimatedEIP1559Gas.Reward,
+			nil,
+			nil,
 			&value,
 			data,
 			nil,
@@ -685,7 +688,7 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 		}
 
 		txHash, err := ethereumClient.SendUnsignedTransaction(
-			privateKey, newContractTx,
+			privateKey.D.Bytes(), newContractTx,
 		)
 		if err != nil {
 			return nil, nil, nil, err
@@ -697,7 +700,7 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 
 		if checkReceipt {
 			isPending := <-ethereumClient.WaitTxConfirmed(txHash)
-			if !isPending {
+			if isPending {
 				return nil, nil, nil, fmt.Errorf("checkReceipt::Transaction should not be pending")
 			}
 			receipt, err := ethereumClient.GetReceipt(txHash.Hex())

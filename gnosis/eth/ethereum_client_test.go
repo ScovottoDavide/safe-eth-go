@@ -3,17 +3,18 @@ package eth
 import (
 	"context"
 	"crypto/rand"
-	"encoding/json"
 	"fmt"
+	"math/big"
 	"os"
 	"testing"
 
-	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const HARDHAT_S_KEY0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+const HARDHAT_S_KEY1 = "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"
 
 var ethereum_client, _ = EthereumClientInit(NewURI("http://localhost:8545"))
 
@@ -37,7 +38,7 @@ func TestEthClientInit(t *testing.T) {
 }
 
 func TestAddressFromPrivKey(t *testing.T) {
-	address, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	address, err := AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -50,28 +51,28 @@ func TestAddressFromPrivKey(t *testing.T) {
 	if n != 30 {
 		t.Fatalf("cannot generate random key")
 	}
-	address, err = eth.AddressFromPrivKey(randKey)
+	address, err = AddressFromPrivKey(randKey)
 	if err == nil && address != nil {
 		t.Fatalf("address should be nil and an error should occur instead")
 	}
 }
 
 func TestSendEthTo(t *testing.T) {
-	address, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	address, err := AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
 
-	to_address, _ := eth.StringToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
+	to_address, _ := StringToAddress("0x70997970C51812dc3A010C7d01b50e0d17dc79C8")
 	gas_price, _ := ethereum_client.GasPrice()
-	amount_to_transfer := eth.ToWei(0.5, 18)
+	amount_to_transfer := ToWei(0.5, 18)
 	estimated_gas, err := ethereum_client.EstimateGas(
 		*address, to_address, 0, gas_price, nil, nil, amount_to_transfer, nil, nil, nil, nil,
 	)
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	fmt.Println("Estimated gas for transferring ", amount_to_transfer, "(", eth.ToDecimal(amount_to_transfer, 18), ")", ": ", estimated_gas)
+	fmt.Println("Estimated gas for transferring ", amount_to_transfer, "(", ToDecimal(amount_to_transfer, 18), ")", ": ", estimated_gas)
 
 	txHash, err := ethereum_client.SendEthTo(
 		HARDHAT_S_KEY0,
@@ -106,20 +107,33 @@ func TestSendEthTo(t *testing.T) {
 }
 
 func TestDeployContract(t *testing.T) {
-	abiPath := "../contracts/MyToken.json"
-	jsonFile, err := os.ReadFile(abiPath)
+	hexBytecode, err := os.ReadFile("../contracts/MyToken.bin")
 	if err != nil {
-		t.Fatalf("cannot open file %s", abiPath)
+		t.Fatal(err.Error())
 	}
-	var payload map[string]interface{}
-	err = json.Unmarshal(jsonFile, &payload)
+	// append the constructor params at the end of the bytecode
+	ownerAddress, _ := AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	// pad the 20byte addr into a 32byte word
+	binOwnerAddress := append(make([]byte, 12), ownerAddress.Bytes()...)
+	data := multipleTxData{
+		constructorData: append(common.Hex2Bytes(string(hexBytecode)), binOwnerAddress...),
+	}
+	_, _, contractAddress, err := ethereum_client.DeployAndInitializeContract(
+		HARDHAT_S_KEY0,
+		data,
+		true,
+		Normal,
+		*big.NewInt(0),
+	)
 	if err != nil {
-		t.Fatalf("error while unmarshalling file read at %s", abiPath)
+		t.Fatal(err.Error())
 	}
-	hexBytecode := payload["bytecode"].(string)
-	// bytecode := hexutil.Decode(hexBytecode)
 
-	// data := multipleTxData{}
-
-	// ethereum_client.DeployAndInitializeContract(HARDHAT_S_KEY0)
+	isContract, err := ethereum_client.IsContract(contractAddress)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	if !isContract {
+		t.Fatalf("contract address is not an actual contract")
+	}
 }
