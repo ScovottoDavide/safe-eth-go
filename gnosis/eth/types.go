@@ -34,14 +34,6 @@ func (uri *URI) GetAddress() string {
 	return uri.address
 }
 
-type Network struct {
-	chainId int
-}
-
-type TxSpeed struct {
-	speed int
-}
-
 type EIP1559EstimatedGas struct {
 	Reward  *big.Int
 	BaseFee *big.Int

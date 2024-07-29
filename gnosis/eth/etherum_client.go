@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/network"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -36,7 +37,7 @@ func EthereumClientInit(uri *URI) (*EthereumClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !isSupported(int(chain_id.Int64())) {
+	if !network.IsSupported(int(chain_id.Int64())) {
 		return nil, errors.New("chain not supported")
 	}
 	fmt.Println("Successfully connected to network with {address: ", uri.address, ", chainId: ", chain_id, "}")
@@ -77,7 +78,7 @@ func (ethereumClient *EthereumClient) GetChainId() (int, error) {
 	} else {
 		chain_id, err := ethereumClient.ethereumClient.ChainID(context.Background())
 		if err != nil {
-			return Unknown.chainId, err
+			return network.Unknown.ChainId, err
 		}
 		ethereumClient.localCache.Set(CHAIN_ID_CACHE_KEY, chain_id.Bytes(), -1)
 		return int(chain_id.Int64()), nil
@@ -181,16 +182,16 @@ func EstimateDataGas(data []byte) uint64 {
 	return gas
 }
 
-func (ethereumClient *EthereumClient) EstimateFeeEip1559(txSpeed TxSpeed) (*EIP1559EstimatedGas, error) {
-	var localSpeed TxSpeed
+func (ethereumClient *EthereumClient) EstimateFeeEip1559(txSpeed network.TxSpeed) (*EIP1559EstimatedGas, error) {
+	var localSpeed network.TxSpeed
 
-	if isTxSpeedAvailable(txSpeed) {
-		localSpeed = tx_speed_map[txSpeed.speed]
+	if network.IsTxSpeedAvailable(txSpeed) {
+		localSpeed = network.TX_SPEED_MAP[txSpeed.Speed]
 	} else {
 		return nil, errors.New("provided TxSpeed is unavailable")
 	}
 
-	feeHistory, err := ethereumClient.ethereumClient.FeeHistory(context.Background(), 1, nil, make([]float64, localSpeed.speed))
+	feeHistory, err := ethereumClient.ethereumClient.FeeHistory(context.Background(), 1, nil, make([]float64, localSpeed.Speed))
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +203,7 @@ func (ethereumClient *EthereumClient) EstimateFeeEip1559(txSpeed TxSpeed) (*EIP1
 	return estimatedGas, nil
 }
 
-func (ethereumClient *EthereumClient) SetEip1559Fee(msg *ethereum.CallMsg, txSpeed TxSpeed) {
+func (ethereumClient *EthereumClient) SetEip1559Fee(msg *ethereum.CallMsg, txSpeed network.TxSpeed) {
 	eip1559_estimated_gas, err := ethereumClient.EstimateFeeEip1559(txSpeed)
 	if err != nil {
 		panic(err)
@@ -612,7 +613,7 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 	iprivateKey interface{},
 	constructorAndInitializerData multipleTxData,
 	checkReceipt bool,
-	txSpeed TxSpeed,
+	txSpeed network.TxSpeed,
 	value big.Int,
 ) (*common.Hash, *types.Transaction, *common.Address, error) {
 	privateKey, err := GetCryptoPrivateKey(iprivateKey)
@@ -635,13 +636,13 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	// estimatedEIP1559Gas := &EIP1559EstimatedGas{Reward: nil, BaseFee: nil}
-	// if ethereumClient.IsEip1559Supported() {
-	// 	estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(txSpeed)
-	// 	if err != nil {
-	// 		return nil, nil, nil, err
-	// 	}
-	// }
+	estimatedEIP1559Gas := &EIP1559EstimatedGas{Reward: nil, BaseFee: nil}
+	if ethereumClient.IsEip1559Supported() {
+		estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(txSpeed)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
 	/*
 	* params to return
 	 */
@@ -660,8 +661,8 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 			to,
 			0,
 			gasPrice,
-			nil,
-			nil,
+			estimatedEIP1559Gas.Reward,
+			estimatedEIP1559Gas.BaseFee,
 			&value,
 			data,
 			nil,
@@ -677,8 +678,8 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 			to,
 			estimatedGas,
 			gasPrice,
-			nil,
-			nil,
+			estimatedEIP1559Gas.Reward,
+			estimatedEIP1559Gas.BaseFee,
 			&value,
 			data,
 			nil,

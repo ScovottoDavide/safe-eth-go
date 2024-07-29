@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/network"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -107,7 +108,7 @@ func TestSendEthTo(t *testing.T) {
 }
 
 func TestDeployContract(t *testing.T) {
-	hexBytecode, err := os.ReadFile("../contracts/MyToken.bin")
+	hexBytecode, err := os.ReadFile("../test_contracts/MyToken.bin")
 	if err != nil {
 		t.Fatal(err.Error())
 	}
@@ -122,7 +123,7 @@ func TestDeployContract(t *testing.T) {
 		HARDHAT_S_KEY0,
 		data,
 		true,
-		Normal,
+		network.Normal,
 		*big.NewInt(0),
 	)
 	if err != nil {
