@@ -169,7 +169,7 @@ func MakeContractAddress(txFrom common.Address, txNonce uint64) common.Address {
 	return crypto.CreateAddress(txFrom, txNonce)
 }
 
-func isTransactionSuccessful(receipt *types.Receipt) bool {
+func IsTransactionSuccessful(receipt *types.Receipt) bool {
 	return receipt.Status == types.ReceiptStatusSuccessful
 }
 

@@ -653,7 +653,7 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 
 	for index, data := range constructorAndInitializerData.toArray() {
 		var to *common.Address
-		if contractAddress.Hex() != NULL_ADDRESS {
+		if *contractAddress != NULL_ADDRESS {
 			to = contractAddress
 		}
 		estimatedGas, err := ethereumClient.EstimateGas(
@@ -711,7 +711,7 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 			if receipt == nil {
 				return nil, nil, nil, fmt.Errorf("checkReceipt::Got nil receipt")
 			}
-			if !isTransactionSuccessful(receipt) {
+			if !IsTransactionSuccessful(receipt) {
 				return nil, nil, nil, fmt.Errorf("checkReceipt::Got Unsucessful Receipt Status")
 			}
 		}
