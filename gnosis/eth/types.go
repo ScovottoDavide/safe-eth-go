@@ -35,8 +35,8 @@ func (uri *URI) GetAddress() string {
 }
 
 type EIP1559EstimatedGas struct {
-	Reward  *big.Int
-	BaseFee *big.Int
+	GasTipCap *big.Int
+	GasFeeCap *big.Int
 }
 
 // from ethclient

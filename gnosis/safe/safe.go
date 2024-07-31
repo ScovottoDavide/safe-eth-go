@@ -72,6 +72,15 @@ func (safe *Safe) Version() (string, error) {
 	return version, err
 }
 
+func (safe *Safe) DomainSeparator() (common.Hash, error) {
+	GnosisSafe, err := contracts.NewGnosisSafe(*safe.safeAddress, safe.ethereumClient.GetGEthClient())
+	if err != nil {
+		return *new(common.Hash), err
+	}
+	domainSeparator, err := GnosisSafe.DomainSeparator(new(bind.CallOpts))
+	return common.BytesToHash(domainSeparator[:]), err
+}
+
 func Create(
 	ethereumClient *eth.EthereumClient,
 	sender common.Address,
@@ -189,4 +198,72 @@ func getProxyCreationResult(proxyFactory *contracts.GnosisSafeProxyFactory, rece
 		return common.Address{}, nil
 	}
 	return result.Proxy, nil
+}
+
+func deployMasterContract(
+	ethereumClient *eth.EthereumClient,
+	sender common.Address,
+	privateKey *ecdsa.PrivateKey,
+	constructorData []byte, // for Safe version < 1.1.1
+) (EthereumTxSent, error) {
+	var _ = constructorData
+	nonce, err := ethereumClient.GetNonceForAccount(sender, "pending")
+	if err != nil {
+		return *new(EthereumTxSent), nil
+	}
+	chainId, err := ethereumClient.GetChainId()
+	if err != nil {
+		return *new(EthereumTxSent), nil
+	}
+
+	estimatedEIP1559Gas := &eth.EIP1559EstimatedGas{GasTipCap: nil, GasFeeCap: nil}
+	var gasPrice *big.Int
+	if ethereumClient.IsEip1559Supported() {
+		estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(network.Normal)
+		if err != nil {
+			return *new(EthereumTxSent), err
+		}
+	} else {
+		gasPrice, err = ethereumClient.GasPrice()
+		if err != nil {
+			return *new(EthereumTxSent), err
+		}
+	}
+
+	auth, err := bind.NewKeyedTransactorWithChainID(
+		privateKey, big.NewInt(int64(chainId)),
+	)
+	if err != nil {
+		return *new(EthereumTxSent), err
+	}
+	auth.From = sender
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = common.Big0
+	if estimatedEIP1559Gas != nil {
+		auth.GasFeeCap = estimatedEIP1559Gas.GasFeeCap
+		auth.GasTipCap = estimatedEIP1559Gas.GasTipCap
+	} else {
+		auth.GasPrice = gasPrice
+	}
+
+	contractAddress, tx, gnosisSafe, err := contracts.DeployGnosisSafe(auth, ethereumClient.GetGEthClient())
+	if err != nil {
+		return *new(EthereumTxSent), err
+	}
+	if gnosisSafe == nil {
+		return *new(EthereumTxSent), err
+	}
+	return EthereumTxSent{
+		tx:               tx,
+		contractAaddress: contractAddress,
+		TxHash:           tx.Hash(),
+	}, nil
+}
+
+func DeployMasterContract_v1_3_0(
+	ethereumClient *eth.EthereumClient,
+	sender common.Address,
+	privateKey *ecdsa.PrivateKey,
+) (EthereumTxSent, error) {
+	return deployMasterContract(ethereumClient, sender, privateKey, nil)
 }

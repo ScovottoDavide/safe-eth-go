@@ -1,6 +1,10 @@
 package eth
 
-import "github.com/ethereum/go-ethereum/common"
+import (
+	"math/big"
+
+	"github.com/ethereum/go-ethereum/common"
+)
 
 const SECPK1_N = 115792089237316195423570985008687907852837564279074904382605163141518161494337
 
@@ -17,6 +21,8 @@ const SIGNATURE_S_MIN_VALUE = 1
 const SIGNATURE_S_MAX_VALUE = SECPK1_N // 2
 const SIGNATURE_V_MIN_VALUE = 27
 const SIGNATURE_V_MAX_VALUE = 28
+
+var MAX_FEE_PER_GAS_COSTANT = big.NewInt(5)
 
 const GAS_CALL_DATA_ZERO_BYTE = 4
 const GAS_CALL_DATA_BYTE = 16 // 68 before Istanbul

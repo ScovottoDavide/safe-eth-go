@@ -195,10 +195,20 @@ func (ethereumClient *EthereumClient) EstimateFeeEip1559(txSpeed network.TxSpeed
 	if err != nil {
 		return nil, err
 	}
-
+	BaseFee := feeHistory.BaseFee[len(feeHistory.BaseFee)-1]
+	GasTipCap := feeHistory.Reward[0][0]
+	if GasTipCap.Uint64() == 0 {
+		GasTipCap, err = ethereumClient.ethereumClient.SuggestGasTipCap(context.Background())
+		if err != nil {
+			return nil, err
+		}
+	}
+	GasFeeCap := new(big.Int)
+	GasFeeCap.Mul(MAX_FEE_PER_GAS_COSTANT, BaseFee)
+	GasFeeCap.Add(GasFeeCap, GasTipCap)
 	estimatedGas := &EIP1559EstimatedGas{
-		Reward:  feeHistory.Reward[0][0],
-		BaseFee: feeHistory.BaseFee[len(feeHistory.BaseFee)-1],
+		GasTipCap: GasTipCap,
+		GasFeeCap: GasFeeCap,
 	}
 	return estimatedGas, nil
 }
@@ -208,8 +218,8 @@ func (ethereumClient *EthereumClient) SetEip1559Fee(msg *ethereum.CallMsg, txSpe
 	if err != nil {
 		panic(err)
 	}
-	msg.GasFeeCap = eip1559_estimated_gas.BaseFee
-	msg.GasTipCap = eip1559_estimated_gas.Reward
+	msg.GasFeeCap = eip1559_estimated_gas.GasFeeCap
+	msg.GasTipCap = eip1559_estimated_gas.GasTipCap
 }
 
 func (ethereumClient *EthereumClient) GetBalance(iaddress interface{}) (*big.Int, error) {
@@ -636,7 +646,7 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	estimatedEIP1559Gas := &EIP1559EstimatedGas{Reward: nil, BaseFee: nil}
+	estimatedEIP1559Gas := &EIP1559EstimatedGas{GasTipCap: nil, GasFeeCap: nil}
 	if ethereumClient.IsEip1559Supported() {
 		estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(txSpeed)
 		if err != nil {
@@ -661,8 +671,8 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 			to,
 			0,
 			gasPrice,
-			estimatedEIP1559Gas.Reward,
-			estimatedEIP1559Gas.BaseFee,
+			estimatedEIP1559Gas.GasFeeCap,
+			estimatedEIP1559Gas.GasTipCap,
 			&value,
 			data,
 			nil,
@@ -678,8 +688,8 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 			to,
 			estimatedGas,
 			gasPrice,
-			estimatedEIP1559Gas.Reward,
-			estimatedEIP1559Gas.BaseFee,
+			estimatedEIP1559Gas.GasFeeCap,
+			estimatedEIP1559Gas.GasTipCap,
 			&value,
 			data,
 			nil,
