@@ -19,6 +19,7 @@ const owner3 = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 
 var uri = eth.NewURI("http://127.0.0.1:8545")
 var ethClient, _ = eth.EthereumClientInit(uri)
+var chainId, _ = ethClient.GetChainId()
 
 func deploySafe(sender *common.Address, ethClient *eth.EthereumClient, privateKey *ecdsa.PrivateKey) common.Address {
 	var owners []common.Address
@@ -29,7 +30,7 @@ func deploySafe(sender *common.Address, ethClient *eth.EthereumClient, privateKe
 		ethClient,
 		*sender,
 		privateKey,
-		common.HexToAddress("0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552"),
+		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
 		owners,
 		2,
 		eth.NULL_ADDRESS,
@@ -65,7 +66,7 @@ func TestCreateNewSafe(t *testing.T) {
 }
 
 func TestSafeVersion(t *testing.T) {
-	safe := New(eth.NULL_ADDRESS, ethClient)
+	safe := New(common.HexToAddress("0x43E77Ba9F5E59CefB97D55CF58641EBb7bEB22c4"), ethClient)
 	if safe == nil {
 		t.Fatalf("Got nil Safe object")
 	}
@@ -90,7 +91,7 @@ func TestSafeDomainSeparator(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 	chainId, _ := ethClient.GetChainId()
-	verifyingContract := network.NetworkToSafeAddress[network.GetNetwork(chainId)]
+	verifyingContract := network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)]
 	dataDomain := apitypes.TypedDataDomain{
 		ChainId:           math.NewHexOrDecimal256(int64(chainId)),
 		VerifyingContract: verifyingContract.Address.Hex(),
@@ -131,6 +132,10 @@ func TestDeployMasterContract_v1_3_0(t *testing.T) {
 	isPending := <-ch
 	if isPending {
 		t.Fatalf("unexpected pending tx %s", ethTxSent.TxHash.Hex())
+	}
+	_, err = ethClient.GetReceipt(ethTxSent.TxHash.Hex())
+	if err != nil {
+		t.Fatalf(err.Error())
 	}
 	isContract, err := ethClient.IsContract(ethTxSent.contractAaddress.Hex())
 	if err != nil {

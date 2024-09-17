@@ -37,9 +37,21 @@ func (safe *Safe) String() string {
 }
 
 func New(safeAddress common.Address, ethClient *eth.EthereumClient) *Safe {
-	masterCopyAddress := network.NetworkToSafeAddress[network.Gochain_Testnet].Address
+	/*
+		Instantiates a new Safe object given an already created "Safe" (GnosisSafeProxy)
+		This object will allow access to all the other required method to interact with the
+		Smart Wallet (tx submit, ...)
+	*/
+	chainId, err := ethClient.GetChainId()
+	if err != nil {
+		return nil
+	}
+	masterCopyAddress := network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address
+	if masterCopyAddress == eth.NULL_ADDRESS {
+		return nil
+	}
 	var safeContract *contracts.GnosisSafe
-	safeContract, err := contracts.NewGnosisSafe(masterCopyAddress, ethClient.GetGEthClient())
+	safeContract, err = contracts.NewGnosisSafe(masterCopyAddress, ethClient.GetGEthClient())
 	if err != nil {
 		safeContract = nil
 	}
@@ -94,6 +106,9 @@ func Create(
 	payment int64,
 	paymentReceiver common.Address,
 ) (EthereumTxSent, error) {
+	/*
+		Creates a new Gnosis Safe Wallet (deploys a new Gnosis Safe Proxy)
+	*/
 	/* owners checks */
 	if len(owners) <= 0 {
 		return *new(EthereumTxSent), fmt.Errorf("at least one owner must be set")
@@ -190,6 +205,11 @@ func Create(
 }
 
 func getProxyCreationResult(proxyFactory *contracts.GnosisSafeProxyFactory, receipt *types.Receipt) (common.Address, error) {
+	/*
+		Get the address of the newly deployed GnosisSafeProxy from the receipt (the address is returned by an event)
+		The ParseProxyCreation catches the following event:
+			`event ProxyCreation(GnosisSafeProxy proxy, address singleton);`
+	*/
 	var result *contracts.GnosisSafeProxyFactoryProxyCreation
 	for _, log := range receipt.Logs {
 		result, _ = proxyFactory.ParseProxyCreation(*log)
@@ -206,6 +226,9 @@ func deployMasterContract(
 	privateKey *ecdsa.PrivateKey,
 	constructorData []byte, // for Safe version < 1.1.1
 ) (EthereumTxSent, error) {
+	/*
+		Private for deploying a new Gnosis Safe Master Copy. For only version 1.3.0 is tested.
+	*/
 	var _ = constructorData
 	nonce, err := ethereumClient.GetNonceForAccount(sender, "pending")
 	if err != nil {
@@ -265,5 +288,8 @@ func DeployMasterContract_v1_3_0(
 	sender common.Address,
 	privateKey *ecdsa.PrivateKey,
 ) (EthereumTxSent, error) {
+	/*
+		Deploys a new v1.3.0 Gnosis Safe Master Copy
+	*/
 	return deployMasterContract(ethereumClient, sender, privateKey, nil)
 }

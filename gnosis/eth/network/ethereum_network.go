@@ -54,7 +54,7 @@ func IsTxSpeedAvailable(txSpeed TxSpeed) bool {
 	return exists
 }
 
-var NetworkToSafeAddress = map[Network]GnosisSafeContract{
+var NetworkToMasterCopyAddress = map[Network]GnosisSafeContract{
 	Mainnet: {
 		Address: common.HexToAddress("0xd9Db270c1B5E3Bd161E8c8503c55cEABeE709552"),
 	},
