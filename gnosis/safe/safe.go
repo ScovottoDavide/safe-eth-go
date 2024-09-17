@@ -118,15 +118,7 @@ func Create(
 	}
 
 	/* Get required information for tx building */
-	nonce, err := ethereumClient.GetNonceForAccount(sender, "pending")
-	if err != nil {
-		return *new(EthereumTxSent), err
-	}
-	chainId, err := ethereumClient.GetChainId()
-	if err != nil {
-		return *new(EthereumTxSent), err
-	}
-	gasPrice, err := ethereumClient.GasPrice()
+	nonce, chainId, _, gasPrice, err := getDefaultTxParams(ethereumClient, sender)
 	if err != nil {
 		return *new(EthereumTxSent), err
 	}
@@ -161,17 +153,11 @@ func Create(
 		return *new(EthereumTxSent), err
 	}
 
-	auth, err := bind.NewKeyedTransactorWithChainID(
-		privateKey, big.NewInt(int64(chainId)),
-	)
+	auth, err := buildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, nil)
 	if err != nil {
 		return *new(EthereumTxSent), err
 	}
-	auth.From = sender
-	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = big.NewInt(0)     // in wei
 	auth.GasLimit = uint64(300000) // in units
-	auth.GasPrice = gasPrice
 
 	tx, err := proxyFactory.CreateProxy(
 		auth,
@@ -204,6 +190,77 @@ func Create(
 	}, nil
 }
 
+func DeployMasterContract_v1_3_0(
+	ethereumClient *eth.EthereumClient,
+	sender common.Address,
+	privateKey *ecdsa.PrivateKey,
+) (EthereumTxSent, error) {
+	/*
+		Deploys a new v1.3.0 Gnosis Safe Master Copy
+	*/
+	return deployMasterContract(ethereumClient, sender, privateKey, nil)
+}
+
+func DeployCompatibilityFallbackHandler(
+	ethereumClient *eth.EthereumClient,
+	sender common.Address,
+	privateKey *ecdsa.PrivateKey,
+) (EthereumTxSent, error) {
+	/*
+		Deploy Compatibility Fallback handler v1.3.0
+	*/
+	nonce, chainId, estimatedEIP1559Gas, gasPrice, err := getDefaultTxParams(ethereumClient, sender)
+	if err != nil {
+		return *new(EthereumTxSent), err
+	}
+
+	auth, err := buildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
+	if err != nil {
+		return *new(EthereumTxSent), err
+	}
+
+	contractAddress, tx, fallbackHandler, err := contracts.DeployCompatibiliyFallbackHandler(auth, ethereumClient.GetGEthClient())
+	if err != nil {
+		return *new(EthereumTxSent), err
+	}
+	if fallbackHandler == nil {
+		return *new(EthereumTxSent), err
+	}
+	return EthereumTxSent{
+		tx:               tx,
+		contractAaddress: contractAddress,
+		TxHash:           tx.Hash(),
+	}, nil
+}
+
+func EstimateSafeCreation(
+	ethereumClient *eth.EthereumClient,
+	sender common.Address,
+	owners []common.Address, // Owners of the Safe
+	threshold int64, // Minimum number of users required to operate the Safe
+	gasPrice int64, // Gas Price
+	funder common.Address, // Address to refund when the Safe is created. Address(0) if no need to refund
+	paymentToken common.Address, // Payment token instead of paying the funder with ether. If None Ether will be used
+	paymentTokenEthValue float64, // Value of payment token per 1 Ether
+	fixedCreationCost int, // Fixed creation cost of Safe (Wei)
+) (int64, int64, uint64, error) {
+	return estimateSafeCreation(
+		ethereumClient,
+		sender,
+		owners,
+		threshold,
+		gasPrice,
+		funder,
+		paymentToken,
+		paymentTokenEthValue,
+		fixedCreationCost,
+	)
+}
+
+/**
+	PRIVATE METHODS
+**/
+
 func getProxyCreationResult(proxyFactory *contracts.GnosisSafeProxyFactory, receipt *types.Receipt) (common.Address, error) {
 	/*
 		Get the address of the newly deployed GnosisSafeProxy from the receipt (the address is returned by an event)
@@ -227,46 +284,17 @@ func deployMasterContract(
 	constructorData []byte, // for Safe version < 1.1.1
 ) (EthereumTxSent, error) {
 	/*
-		Private for deploying a new Gnosis Safe Master Copy. For only version 1.3.0 is tested.
+		Private method for deploying a new Gnosis Safe Master Copy. For only version 1.3.0 is tested.
 	*/
 	var _ = constructorData
-	nonce, err := ethereumClient.GetNonceForAccount(sender, "pending")
-	if err != nil {
-		return *new(EthereumTxSent), nil
-	}
-	chainId, err := ethereumClient.GetChainId()
-	if err != nil {
-		return *new(EthereumTxSent), nil
-	}
-
-	estimatedEIP1559Gas := &eth.EIP1559EstimatedGas{GasTipCap: nil, GasFeeCap: nil}
-	var gasPrice *big.Int
-	if ethereumClient.IsEip1559Supported() {
-		estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(network.Normal)
-		if err != nil {
-			return *new(EthereumTxSent), err
-		}
-	} else {
-		gasPrice, err = ethereumClient.GasPrice()
-		if err != nil {
-			return *new(EthereumTxSent), err
-		}
-	}
-
-	auth, err := bind.NewKeyedTransactorWithChainID(
-		privateKey, big.NewInt(int64(chainId)),
-	)
+	nonce, chainId, estimatedEIP1559Gas, gasPrice, err := getDefaultTxParams(ethereumClient, sender)
 	if err != nil {
 		return *new(EthereumTxSent), err
 	}
-	auth.From = sender
-	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = common.Big0
-	if estimatedEIP1559Gas != nil {
-		auth.GasFeeCap = estimatedEIP1559Gas.GasFeeCap
-		auth.GasTipCap = estimatedEIP1559Gas.GasTipCap
-	} else {
-		auth.GasPrice = gasPrice
+
+	auth, err := buildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
+	if err != nil {
+		return *new(EthereumTxSent), err
 	}
 
 	contractAddress, tx, gnosisSafe, err := contracts.DeployGnosisSafe(auth, ethereumClient.GetGEthClient())
@@ -283,13 +311,57 @@ func deployMasterContract(
 	}, nil
 }
 
-func DeployMasterContract_v1_3_0(
+func getDefaultTxParams(
 	ethereumClient *eth.EthereumClient,
 	sender common.Address,
+) (uint64, int, *eth.EIP1559EstimatedGas, *big.Int, error) {
+	nonce, err := ethereumClient.GetNonceForAccount(sender, "pending")
+	if err != nil {
+		return 0, 0, nil, nil, err
+	}
+	chainId, err := ethereumClient.GetChainId()
+	if err != nil {
+		return 0, 0, nil, nil, err
+	}
+
+	estimatedEIP1559Gas := &eth.EIP1559EstimatedGas{GasTipCap: nil, GasFeeCap: nil}
+	var gasPrice *big.Int
+	if ethereumClient.IsEip1559Supported() {
+		estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(network.Normal)
+		if err != nil {
+			return 0, 0, nil, nil, err
+		}
+	} else {
+		gasPrice, err = ethereumClient.GasPrice()
+		if err != nil {
+			return 0, 0, nil, nil, err
+		}
+	}
+	return nonce, chainId, estimatedEIP1559Gas, gasPrice, nil
+}
+
+func buildTransactionWithSigner(
+	sender common.Address,
 	privateKey *ecdsa.PrivateKey,
-) (EthereumTxSent, error) {
-	/*
-		Deploys a new v1.3.0 Gnosis Safe Master Copy
-	*/
-	return deployMasterContract(ethereumClient, sender, privateKey, nil)
+	chainId int64,
+	nonce int64,
+	gasPrice *big.Int,
+	estimatedEIP1559Gas *eth.EIP1559EstimatedGas,
+) (*bind.TransactOpts, error) {
+	auth, err := bind.NewKeyedTransactorWithChainID(
+		privateKey, big.NewInt(int64(chainId)),
+	)
+	if err != nil {
+		return nil, err
+	}
+	auth.From = sender
+	auth.Nonce = big.NewInt(int64(nonce))
+	auth.Value = common.Big0
+	if estimatedEIP1559Gas != nil {
+		auth.GasFeeCap = estimatedEIP1559Gas.GasFeeCap
+		auth.GasTipCap = estimatedEIP1559Gas.GasTipCap
+	} else {
+		auth.GasPrice = gasPrice
+	}
+	return auth, nil
 }

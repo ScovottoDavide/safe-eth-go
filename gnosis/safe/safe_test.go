@@ -45,6 +45,14 @@ func deploySafe(sender *common.Address, ethClient *eth.EthereumClient, privateKe
 	if txSent.contractAaddress == eth.NULL_ADDRESS {
 		return eth.NULL_ADDRESS
 	}
+	ch := ethClient.WaitTxConfirmed(txSent.TxHash)
+	isPending := <-ch
+	if isPending {
+		fmt.Printf("unexpected pending tx %s", txSent.TxHash.Hex())
+	}
+	receipt, _ := ethClient.GetReceipt(txSent.TxHash.Hex())
+	fmt.Println("Used gas: ", receipt.GasUsed)
+	fmt.Println("Safe creation payment: ", receipt.GasUsed*receipt.EffectiveGasPrice.Uint64())
 	fmt.Println(txSent.contractAaddress.Hex())
 	return txSent.contractAaddress
 }
@@ -145,4 +153,60 @@ func TestDeployMasterContract_v1_3_0(t *testing.T) {
 	if !isContract {
 		t.Fatalf("could not deploy master copy contract v1.3.0")
 	}
+}
+
+func TestDeployCompatibilityFallbackHandler(t *testing.T) {
+	sender, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	privateKey, err := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	ethTxSent, err := DeployCompatibilityFallbackHandler(ethClient, *sender, privateKey)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	ch := ethClient.WaitTxConfirmed(ethTxSent.TxHash)
+	isPending := <-ch
+	if isPending {
+		t.Fatalf("unexpected pending tx %s", ethTxSent.TxHash.Hex())
+	}
+	_, err = ethClient.GetReceipt(ethTxSent.TxHash.Hex())
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	isContract, err := ethClient.IsContract(ethTxSent.contractAaddress.Hex())
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	if !isContract {
+		t.Fatalf("could not deploy master copy contract v1.3.0")
+	}
+}
+
+func TestEstimateSafeCreation(t *testing.T) {
+	sender, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	var owners []common.Address
+	owners = append(owners, *sender)
+	owners = append(owners, common.HexToAddress(owner2))
+	owners = append(owners, common.HexToAddress(owner3))
+	gasPrice, err := ethClient.GasPrice()
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	gas, _gasPrice, payment, err := EstimateSafeCreation(
+		ethClient, *sender, owners, 2, gasPrice.Int64(), eth.NULL_ADDRESS, eth.NULL_ADDRESS, 1.0, 0,
+	)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	t.Log(gas)
+	t.Log(_gasPrice)
+	t.Log(payment)
 }
