@@ -1,40 +1,75 @@
-package safe
+package safecreations
 
 import (
+	"errors"
 	"math"
 	"math/big"
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/contracts"
+	safe_utils "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/utils"
 	"github.com/ethereum/go-ethereum/common"
 )
 
-func estimateSafeCreation(
+type SafeCreationTx struct {
+	ethereumClient       *eth.EthereumClient // Web3 instance
+	owners               []common.Address    // Owners of the Safe
+	threshold            int64               // Minimum number of users required to operate the Safe
+	signature_s          uint64              // Random s value for ecdsa signature
+	masterCopy           common.Address      // Safe master copy address
+	funder               common.Address      // Address to refund when the Safe is created. Address(0) if no need to refund
+	paymentToken         common.Address      // Payment token instead of paying the funder with ether. If None Ether will be used
+	paymentTokenEthValue float64             // Value of payment token per 1 Ether
+	fixedCreationCost    int                 // Fixed creation cost of Safe (Wei)
+}
+
+func NewSafeCreationTx(
 	ethereumClient *eth.EthereumClient,
-	sender common.Address,
-	owners []common.Address, // Owners of the Safe
-	threshold int64, // Minimum number of users required to operate the Safe
-	gasPrice int64, // Gas Price
-	funder common.Address, // Address to refund when the Safe is created. Address(0) if no need to refund
-	paymentToken common.Address, // Payment token instead of paying the funder with ether. If None Ether will be used
-	paymentTokenEthValue float64, // Value of payment token per 1 Ether
-	fixedCreationCost int, // Fixed creation cost of Safe (Wei)
-) (int64, int64, uint64, error) {
+	owners []common.Address,
+	threshold int64,
+	signature_s uint64,
+	masterCopy common.Address,
+	funder common.Address,
+	paymentToken common.Address,
+	paymentTokenEthValue float64,
+	fixedCreationCost int,
+) (*SafeCreationTx, error) {
+	if threshold <= 0 || int(threshold) > len(owners) {
+		return nil, errors.New("threshold cannot be negative or greter the number of Safe owners")
+	}
+
+	return &SafeCreationTx{
+		ethereumClient:       ethereumClient,
+		owners:               owners,
+		threshold:            threshold,
+		signature_s:          signature_s,
+		masterCopy:           masterCopy,
+		funder:               funder,
+		paymentToken:         paymentToken,
+		paymentTokenEthValue: paymentTokenEthValue,
+		fixedCreationCost:    fixedCreationCost,
+	}, nil
+}
+
+func (safeCreationTx *SafeCreationTx) EstimateSafeCreation(sender common.Address, gasPrice int64) (int64, int64, uint64, error) {
 	// Prepare Safe creation
 
 	// This initializer will be passed to the proxy and will be called right after proxy is deployed
-	safeSetupData, err := getInitialSetupSafeData(owners, threshold, paymentToken, funder)
+	safeSetupData, err := getInitialSetupSafeData(
+		safeCreationTx.owners, safeCreationTx.threshold, safeCreationTx.paymentToken, safeCreationTx.funder,
+	)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 
 	// Calculate gas based on experience of previous deployments of the safe
-	calculated_gas := calculateCreationGas(owners, safeSetupData, paymentToken)
+	calculated_gas := calculateCreationGas(safeCreationTx.owners, safeSetupData, safeCreationTx.paymentToken)
 	// Estimate gas using web3
-	estimated_gas := estimateCreationGas(ethereumClient, sender, funder, safeSetupData, paymentToken)
+	estimated_gas := estimateCreationGas(
+		safeCreationTx.ethereumClient, sender, safeCreationTx.funder, safeSetupData, safeCreationTx.paymentToken)
 
 	gas := max(calculated_gas, estimated_gas)
-	payment := calculateRefundPayment(gas, gasPrice, fixedCreationCost, paymentTokenEthValue)
+	payment := calculateRefundPayment(gas, gasPrice, safeCreationTx.fixedCreationCost, safeCreationTx.paymentTokenEthValue)
 
 	return gas, gasPrice, payment, nil
 }
@@ -95,7 +130,7 @@ func estimateCreationGas(
 	safeSetupData []byte,
 	paymentToken common.Address,
 ) int64 {
-	_, _, estimatedEIP1559Gas, gasPrice, err := getDefaultTxParams(ethereumClient, sender)
+	_, _, estimatedEIP1559Gas, gasPrice, err := safe_utils.GetDefaultTxParams(ethereumClient, sender)
 	if err != nil {
 		return 0
 	}

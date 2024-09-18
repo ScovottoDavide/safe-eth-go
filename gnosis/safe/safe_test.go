@@ -42,7 +42,7 @@ func deploySafe(sender *common.Address, ethClient *eth.EthereumClient, privateKe
 	if err != nil {
 		return eth.NULL_ADDRESS
 	}
-	if txSent.contractAaddress == eth.NULL_ADDRESS {
+	if txSent.ContractAaddress == eth.NULL_ADDRESS {
 		return eth.NULL_ADDRESS
 	}
 	ch := ethClient.WaitTxConfirmed(txSent.TxHash)
@@ -53,8 +53,8 @@ func deploySafe(sender *common.Address, ethClient *eth.EthereumClient, privateKe
 	receipt, _ := ethClient.GetReceipt(txSent.TxHash.Hex())
 	fmt.Println("Used gas: ", receipt.GasUsed)
 	fmt.Println("Safe creation payment: ", receipt.GasUsed*receipt.EffectiveGasPrice.Uint64())
-	fmt.Println(txSent.contractAaddress.Hex())
-	return txSent.contractAaddress
+	fmt.Println(txSent.ContractAaddress.Hex())
+	return txSent.ContractAaddress
 }
 
 func TestCreateNewSafe(t *testing.T) {
@@ -145,7 +145,7 @@ func TestDeployMasterContract_v1_3_0(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	isContract, err := ethClient.IsContract(ethTxSent.contractAaddress.Hex())
+	isContract, err := ethClient.IsContract(ethTxSent.ContractAaddress.Hex())
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -177,7 +177,7 @@ func TestDeployCompatibilityFallbackHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	isContract, err := ethClient.IsContract(ethTxSent.contractAaddress.Hex())
+	isContract, err := ethClient.IsContract(ethTxSent.ContractAaddress.Hex())
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -209,4 +209,6 @@ func TestEstimateSafeCreation(t *testing.T) {
 	t.Log(gas)
 	t.Log(_gasPrice)
 	t.Log(payment)
+	/* SafeCreationEstimate from safe-eth-py (gas=394016, gas_price=1875000000, payment=781905000000000,
+	payment_token='0x0000000000000000000000000000000000000000')*/
 }

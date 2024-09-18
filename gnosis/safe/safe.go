@@ -8,10 +8,12 @@ import (
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/contracts"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/network"
+	safecreations "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/safe_creations"
+	safe_types "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/types"
+	safe_utils "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/utils"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 )
 
 // keccak256("fallback_manager.handler.address")
@@ -105,28 +107,28 @@ func Create(
 	paymentToken common.Address,
 	payment int64,
 	paymentReceiver common.Address,
-) (EthereumTxSent, error) {
+) (safe_types.EthereumTxSent, error) {
 	/*
 		Creates a new Gnosis Safe Wallet (deploys a new Gnosis Safe Proxy)
 	*/
 	/* owners checks */
 	if len(owners) <= 0 {
-		return *new(EthereumTxSent), fmt.Errorf("at least one owner must be set")
+		return *new(safe_types.EthereumTxSent), fmt.Errorf("at least one owner must be set")
 	}
 	if !(threshold >= 1 && int(threshold) <= len(owners)) {
-		return *new(EthereumTxSent), fmt.Errorf("threshold=%d must be <= %d", threshold, len(owners))
+		return *new(safe_types.EthereumTxSent), fmt.Errorf("threshold=%d must be <= %d", threshold, len(owners))
 	}
 
 	/* Get required information for tx building */
-	nonce, chainId, _, gasPrice, err := getDefaultTxParams(ethereumClient, sender)
+	nonce, chainId, _, gasPrice, err := safe_utils.GetDefaultTxParams(ethereumClient, sender)
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 
 	/* construct the initialization data needed for the proxy to initialize the Safe */
 	safeAbi, err := contracts.GnosisSafeMetaData.GetAbi()
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 	method := safeAbi.Methods["setup"].Name
 	initializer, err := safeAbi.Pack(
@@ -141,7 +143,7 @@ func Create(
 		paymentReceiver,
 	)
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 
 	/* retrieve the ProxyFactory contract and deploy the new Proxy */
@@ -150,12 +152,12 @@ func Create(
 		ethereumClient.GetGEthClient(),
 	)
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 
-	auth, err := buildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, nil)
+	auth, err := safe_utils.BuildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, nil)
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 	auth.GasLimit = uint64(300000) // in units
 
@@ -165,27 +167,27 @@ func Create(
 		initializer,
 	)
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 	ch := ethereumClient.WaitTxConfirmed(tx.Hash())
 	isPending := <-ch
 	if isPending {
-		return *new(EthereumTxSent), fmt.Errorf("safe creation transaction still pending. hash %s", tx.Hash().Hex())
+		return *new(safe_types.EthereumTxSent), fmt.Errorf("safe creation transaction still pending. hash %s", tx.Hash().Hex())
 	}
 	receipt, err := ethereumClient.GetReceipt(tx.Hash().String())
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 	if !eth.IsTransactionSuccessful(receipt) {
-		return *new(EthereumTxSent), fmt.Errorf("safe creation FAILED. hash %s", tx.Hash().Hex())
+		return *new(safe_types.EthereumTxSent), fmt.Errorf("safe creation FAILED. hash %s", tx.Hash().Hex())
 	}
-	proxyAddress, err := getProxyCreationResult(proxyFactory, receipt)
+	proxyAddress, err := safe_utils.GetProxyCreationResult(proxyFactory, receipt)
 	if err != nil {
-		return *new(EthereumTxSent), fmt.Errorf("safe creation FAILED. proxyAddress not found in receipt")
+		return *new(safe_types.EthereumTxSent), fmt.Errorf("safe creation FAILED. proxyAddress not found in receipt")
 	}
-	return EthereumTxSent{
-		tx:               tx,
-		contractAaddress: proxyAddress,
+	return safe_types.EthereumTxSent{
+		Tx:               tx,
+		ContractAaddress: proxyAddress,
 		TxHash:           receipt.TxHash,
 	}, nil
 }
@@ -194,41 +196,41 @@ func DeployMasterContract_v1_3_0(
 	ethereumClient *eth.EthereumClient,
 	sender common.Address,
 	privateKey *ecdsa.PrivateKey,
-) (EthereumTxSent, error) {
+) (safe_types.EthereumTxSent, error) {
 	/*
 		Deploys a new v1.3.0 Gnosis Safe Master Copy
 	*/
-	return deployMasterContract(ethereumClient, sender, privateKey, nil)
+	return safe_utils.DeployMasterContract(ethereumClient, sender, privateKey, nil)
 }
 
 func DeployCompatibilityFallbackHandler(
 	ethereumClient *eth.EthereumClient,
 	sender common.Address,
 	privateKey *ecdsa.PrivateKey,
-) (EthereumTxSent, error) {
+) (safe_types.EthereumTxSent, error) {
 	/*
 		Deploy Compatibility Fallback handler v1.3.0
 	*/
-	nonce, chainId, estimatedEIP1559Gas, gasPrice, err := getDefaultTxParams(ethereumClient, sender)
+	nonce, chainId, estimatedEIP1559Gas, gasPrice, err := safe_utils.GetDefaultTxParams(ethereumClient, sender)
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 
-	auth, err := buildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
+	auth, err := safe_utils.BuildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 
 	contractAddress, tx, fallbackHandler, err := contracts.DeployCompatibiliyFallbackHandler(auth, ethereumClient.GetGEthClient())
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
 	if fallbackHandler == nil {
-		return *new(EthereumTxSent), err
+		return *new(safe_types.EthereumTxSent), err
 	}
-	return EthereumTxSent{
-		tx:               tx,
-		contractAaddress: contractAddress,
+	return safe_types.EthereumTxSent{
+		Tx:               tx,
+		ContractAaddress: contractAddress,
 		TxHash:           tx.Hash(),
 	}, nil
 }
@@ -244,124 +246,23 @@ func EstimateSafeCreation(
 	paymentTokenEthValue float64, // Value of payment token per 1 Ether
 	fixedCreationCost int, // Fixed creation cost of Safe (Wei)
 ) (int64, int64, uint64, error) {
-	return estimateSafeCreation(
+	chainId, err := ethereumClient.GetChainId()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	safeCreationTx, err := safecreations.NewSafeCreationTx(
 		ethereumClient,
-		sender,
 		owners,
 		threshold,
-		gasPrice,
+		0,
+		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
 		funder,
 		paymentToken,
 		paymentTokenEthValue,
 		fixedCreationCost,
 	)
-}
-
-/**
-	PRIVATE METHODS
-**/
-
-func getProxyCreationResult(proxyFactory *contracts.GnosisSafeProxyFactory, receipt *types.Receipt) (common.Address, error) {
-	/*
-		Get the address of the newly deployed GnosisSafeProxy from the receipt (the address is returned by an event)
-		The ParseProxyCreation catches the following event:
-			`event ProxyCreation(GnosisSafeProxy proxy, address singleton);`
-	*/
-	var result *contracts.GnosisSafeProxyFactoryProxyCreation
-	for _, log := range receipt.Logs {
-		result, _ = proxyFactory.ParseProxyCreation(*log)
-	}
-	if result == nil {
-		return common.Address{}, nil
-	}
-	return result.Proxy, nil
-}
-
-func deployMasterContract(
-	ethereumClient *eth.EthereumClient,
-	sender common.Address,
-	privateKey *ecdsa.PrivateKey,
-	constructorData []byte, // for Safe version < 1.1.1
-) (EthereumTxSent, error) {
-	/*
-		Private method for deploying a new Gnosis Safe Master Copy. For only version 1.3.0 is tested.
-	*/
-	var _ = constructorData
-	nonce, chainId, estimatedEIP1559Gas, gasPrice, err := getDefaultTxParams(ethereumClient, sender)
 	if err != nil {
-		return *new(EthereumTxSent), err
+		return 0, 0, 0, err
 	}
-
-	auth, err := buildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
-	if err != nil {
-		return *new(EthereumTxSent), err
-	}
-
-	contractAddress, tx, gnosisSafe, err := contracts.DeployGnosisSafe(auth, ethereumClient.GetGEthClient())
-	if err != nil {
-		return *new(EthereumTxSent), err
-	}
-	if gnosisSafe == nil {
-		return *new(EthereumTxSent), err
-	}
-	return EthereumTxSent{
-		tx:               tx,
-		contractAaddress: contractAddress,
-		TxHash:           tx.Hash(),
-	}, nil
-}
-
-func getDefaultTxParams(
-	ethereumClient *eth.EthereumClient,
-	sender common.Address,
-) (uint64, int, *eth.EIP1559EstimatedGas, *big.Int, error) {
-	nonce, err := ethereumClient.GetNonceForAccount(sender, "pending")
-	if err != nil {
-		return 0, 0, nil, nil, err
-	}
-	chainId, err := ethereumClient.GetChainId()
-	if err != nil {
-		return 0, 0, nil, nil, err
-	}
-
-	estimatedEIP1559Gas := &eth.EIP1559EstimatedGas{GasTipCap: nil, GasFeeCap: nil}
-	var gasPrice *big.Int
-	if ethereumClient.IsEip1559Supported() {
-		estimatedEIP1559Gas, err = ethereumClient.EstimateFeeEip1559(network.Normal)
-		if err != nil {
-			return 0, 0, nil, nil, err
-		}
-	} else {
-		gasPrice, err = ethereumClient.GasPrice()
-		if err != nil {
-			return 0, 0, nil, nil, err
-		}
-	}
-	return nonce, chainId, estimatedEIP1559Gas, gasPrice, nil
-}
-
-func buildTransactionWithSigner(
-	sender common.Address,
-	privateKey *ecdsa.PrivateKey,
-	chainId int64,
-	nonce int64,
-	gasPrice *big.Int,
-	estimatedEIP1559Gas *eth.EIP1559EstimatedGas,
-) (*bind.TransactOpts, error) {
-	auth, err := bind.NewKeyedTransactorWithChainID(
-		privateKey, big.NewInt(int64(chainId)),
-	)
-	if err != nil {
-		return nil, err
-	}
-	auth.From = sender
-	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = common.Big0
-	if estimatedEIP1559Gas != nil {
-		auth.GasFeeCap = estimatedEIP1559Gas.GasFeeCap
-		auth.GasTipCap = estimatedEIP1559Gas.GasTipCap
-	} else {
-		auth.GasPrice = gasPrice
-	}
-	return auth, nil
+	return safeCreationTx.EstimateSafeCreation(sender, gasPrice)
 }

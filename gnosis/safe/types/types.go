@@ -1,4 +1,4 @@
-package safe
+package types
 
 import (
 	"github.com/ethereum/go-ethereum/common"
@@ -7,6 +7,6 @@ import (
 
 type EthereumTxSent struct {
 	TxHash           common.Hash
-	tx               *types.Transaction
-	contractAaddress common.Address
+	Tx               *types.Transaction
+	ContractAaddress common.Address
 }
