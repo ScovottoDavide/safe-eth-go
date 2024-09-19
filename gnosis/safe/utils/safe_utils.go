@@ -61,9 +61,9 @@ func DeployMasterContract(
 		return *new(safe_types.EthereumTxSent), err
 	}
 	return safe_types.EthereumTxSent{
-		Tx:               tx,
-		ContractAaddress: contractAddress,
-		TxHash:           tx.Hash(),
+		Tx:              tx,
+		ContractAddress: contractAddress,
+		TxHash:          tx.Hash(),
 	}, nil
 }
 

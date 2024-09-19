@@ -6,7 +6,7 @@ import (
 )
 
 type EthereumTxSent struct {
-	TxHash           common.Hash
-	Tx               *types.Transaction
-	ContractAaddress common.Address
+	TxHash          common.Hash
+	Tx              *types.Transaction
+	ContractAddress common.Address
 }

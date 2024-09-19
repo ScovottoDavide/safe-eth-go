@@ -169,6 +169,10 @@ func MakeContractAddress(txFrom common.Address, txNonce uint64) common.Address {
 	return crypto.CreateAddress(txFrom, txNonce)
 }
 
+func MakeContractAddress2(txFrom common.Address, saltNonce [32]byte, inithash []byte) common.Address {
+	return crypto.CreateAddress2(txFrom, saltNonce, inithash)
+}
+
 func IsTransactionSuccessful(receipt *types.Receipt) bool {
 	return receipt.Status == types.ReceiptStatusSuccessful
 }
@@ -178,4 +182,12 @@ func (tx *rpcTransaction) UnmarshalJSON(msg []byte) error {
 		return err
 	}
 	return json.Unmarshal(msg, &tx.txExtraInfo)
+}
+
+func RandomAddress() (*common.Address, error) {
+	s_key, err := crypto.GenerateKey()
+	if err != nil {
+		return nil, err
+	}
+	return AddressFromPrivKey(s_key.X.Bytes())
 }

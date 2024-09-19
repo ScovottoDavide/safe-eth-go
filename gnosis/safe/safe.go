@@ -148,7 +148,7 @@ func Create(
 
 	/* retrieve the ProxyFactory contract and deploy the new Proxy */
 	proxyFactory, err := contracts.NewGnosisSafeProxyFactory(
-		network.NetworkToSafeProxyFactoryAddress[network.Gochain_Testnet].Address,
+		network.NetworkToSafeProxyFactoryAddress[network.GetNetwork(chainId)].Address,
 		ethereumClient.GetGEthClient(),
 	)
 	if err != nil {
@@ -186,9 +186,9 @@ func Create(
 		return *new(safe_types.EthereumTxSent), fmt.Errorf("safe creation FAILED. proxyAddress not found in receipt")
 	}
 	return safe_types.EthereumTxSent{
-		Tx:               tx,
-		ContractAaddress: proxyAddress,
-		TxHash:           receipt.TxHash,
+		Tx:              tx,
+		ContractAddress: proxyAddress,
+		TxHash:          receipt.TxHash,
 	}, nil
 }
 
@@ -229,24 +229,26 @@ func DeployCompatibilityFallbackHandler(
 		return *new(safe_types.EthereumTxSent), err
 	}
 	return safe_types.EthereumTxSent{
-		Tx:               tx,
-		ContractAaddress: contractAddress,
-		TxHash:           tx.Hash(),
+		Tx:              tx,
+		ContractAddress: contractAddress,
+		TxHash:          tx.Hash(),
 	}, nil
 }
 
 func EstimateSafeCreation(
 	ethereumClient *eth.EthereumClient,
-	sender common.Address,
 	owners []common.Address, // Owners of the Safe
 	threshold int64, // Minimum number of users required to operate the Safe
-	gasPrice int64, // Gas Price
 	funder common.Address, // Address to refund when the Safe is created. Address(0) if no need to refund
 	paymentToken common.Address, // Payment token instead of paying the funder with ether. If None Ether will be used
 	paymentTokenEthValue float64, // Value of payment token per 1 Ether
 	fixedCreationCost int, // Fixed creation cost of Safe (Wei)
-) (int64, int64, uint64, error) {
+) (uint64, int64, uint64, error) {
 	chainId, err := ethereumClient.GetChainId()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	gasPrice, err := ethereumClient.GasPrice()
 	if err != nil {
 		return 0, 0, 0, err
 	}
@@ -254,8 +256,8 @@ func EstimateSafeCreation(
 		ethereumClient,
 		owners,
 		threshold,
-		0,
 		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
+		eth.NULL_ADDRESS,
 		funder,
 		paymentToken,
 		paymentTokenEthValue,
@@ -264,5 +266,6 @@ func EstimateSafeCreation(
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	return safeCreationTx.EstimateSafeCreation(sender, gasPrice)
+	safeCreationTx.EstimateSafeCreation()
+	return safeCreationTx.CreationGas, gasPrice.Int64(), safeCreationTx.Payment, err
 }
