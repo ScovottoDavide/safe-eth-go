@@ -2,30 +2,27 @@ package safecreations
 
 import (
 	"errors"
-	"fmt"
 	"math/big"
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/contracts"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/network"
-	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	eth_crypto "github.com/ethereum/go-ethereum/crypto"
 )
 
 type SafeCreationTx2 struct {
-	ethereumClient       *eth.EthereumClient // Web3 instance
+	EthereumClient       *eth.EthereumClient // Web3 instance
 	owners               []common.Address    // Owners of the Safe
 	threshold            int64               // Minimum number of users required to operate the Safe
-	masterCopy           common.Address      // Safe master copy address
+	MasterCopy           common.Address      // Safe master copy address
 	fallbackHandler      common.Address      // Handler for fallback calls to the Safe
 	funder               common.Address      // Address to refund when the Safe is created. Address(0) if no need to refund
 	paymentToken         common.Address      // Payment token instead of paying the funder with ether. If None Ether will be used
 	paymentTokenEthValue float64             // Value of payment token per 1 Ether
 	fixedCreationCost    int                 // Fixed creation cost of Safe (Wei)
 	ExpectedSafeAddress2 common.Address      // safe address calculated from sender's current nonce (CREATE2_OP)
-	saltNonce            int64               // salt nonce used for create2 safe address pre-deploy calculation
+	SaltNonce            int64               // salt nonce used for create2 safe address pre-deploy calculation
 	Payment              uint64              // refund to be payed after creation to 'funder' address
 	CreationGas          uint64
 }
@@ -47,24 +44,24 @@ func NewSafeCreationTx2(
 	}
 
 	return &SafeCreationTx2{
-		ethereumClient:       ethereumClient,
+		EthereumClient:       ethereumClient,
 		owners:               owners,
 		threshold:            threshold,
-		masterCopy:           masterCopy,
+		MasterCopy:           masterCopy,
 		fallbackHandler:      fallbackHandler,
 		funder:               funder,
 		paymentToken:         paymentToken,
 		paymentTokenEthValue: paymentTokenEthValue,
 		fixedCreationCost:    fixedCreationCost,
 		ExpectedSafeAddress2: eth.NULL_ADDRESS,
-		saltNonce:            saltNonce,
+		SaltNonce:            saltNonce,
 		Payment:              0,
 		CreationGas:          0,
 	}, nil
 }
 
 func (safeCreationTx2 *SafeCreationTx2) EstimateSafeCreation2() error {
-	gasPrice, err := safeCreationTx2.ethereumClient.GasPrice()
+	gasPrice, err := safeCreationTx2.EthereumClient.GasPrice()
 	if err != nil {
 		return err
 	}
@@ -78,12 +75,14 @@ func (safeCreationTx2 *SafeCreationTx2) EstimateSafeCreation2() error {
 	calculated_gas := safeCreationTx2.calculateCreationGas(safeSetupData)
 	// Estimate gas using web3
 	estimated_gas := safeCreationTx2.estimateCreationGas2(safeSetupData)
-
 	gas := max(calculated_gas, estimated_gas)
-	payment := calculatePayment(safeCreationTx2.fixedCreationCost, safeCreationTx2.paymentTokenEthValue, int64(gas), gasPrice.Int64())
 
+	/* if there is a funder set up it means that once deployed the Safe will have to pay back the gas spent by the funder */
+	if safeCreationTx2.funder != eth.NULL_ADDRESS {
+		payment := calculatePayment(safeCreationTx2.fixedCreationCost, safeCreationTx2.paymentTokenEthValue, int64(gas), gasPrice.Int64())
+		safeCreationTx2.Payment = payment
+	}
 	safeCreationTx2.CreationGas = gas
-	safeCreationTx2.Payment = payment
 	return nil
 }
 
@@ -94,61 +93,35 @@ func (safeCreationTx2 *SafeCreationTx2) PredictSafeAddress_CREATE2() {
 		return
 	}
 
-	chainId, err := safeCreationTx2.ethereumClient.GetChainId()
+	chainId, err := safeCreationTx2.EthereumClient.GetChainId()
 	if err != nil {
 		return
 	}
 	proxyFactoryAddress := network.NetworkToSafeProxyFactoryAddress[network.GetNetwork(chainId)].Address
 	proxyFactory, err := contracts.NewGnosisSafeProxyFactory(
 		proxyFactoryAddress,
-		safeCreationTx2.ethereumClient.GetGEthClient(),
+		safeCreationTx2.EthereumClient.GetGEthClient(),
 	)
 	if err != nil {
 		return
 	}
 
-	uint256, _ := abi.NewType("uint256", "uint256", nil)
-	bytesTy, _ := abi.NewType("bytes", "bytes", nil)
-
-	arguments := abi.Arguments{
-		{
-			Type: bytesTy,
-		},
-		{
-			Type: uint256,
-		},
-	}
-
-	salt, err := arguments.Pack(eth_crypto.Keccak256(safeCreationTx2.GetInitializer2()), big.NewInt(safeCreationTx2.saltNonce))
-	//salt, err := rlp.EncodeToBytes([]interface{}{eth_crypto.Keccak256(safeCreationTx2.GetInitializer2()), uint64(safeCreationTx2.saltNonce)})
-	fmt.Println("Salt: ", hexutil.Encode(salt))
-
-	if err != nil {
-		return
-	}
-	salt32 := eth_crypto.Keccak256Hash(salt)
+	// keccak(abi.encodePacked)
+	nonce := common.LeftPadBytes(big.NewInt(safeCreationTx2.SaltNonce).Bytes(), 32)
+	salt_ := append(eth_crypto.Keccak256(safeCreationTx2.GetInitializer2()), nonce...)
+	salt32 := eth_crypto.Keccak256Hash(salt_)
 
 	creationCode, err := proxyFactory.ProxyCreationCode(nil)
 	if err != nil {
 		return
 	}
 
-	arguments = abi.Arguments{
-		{
-			Type: bytesTy,
-		},
-		{
-			Type: uint256,
-		},
-	}
 	masterCopyInt := new(big.Int)
-	masterCopyInt.SetString(safeCreationTx2.masterCopy.String(), 16)
-	deploymentData, err := arguments.Pack(creationCode, masterCopyInt)
-	inithash := eth_crypto.Keccak256Hash(deploymentData)
-	// inithash, err := rlp.EncodeToBytes([]interface{}{creationCode, masterCopyInt})
-	if err != nil {
-		return
-	}
+	masterCopyInt, _ = masterCopyInt.SetString(safeCreationTx2.MasterCopy.String(), 0)
+	inithash := eth_crypto.Keccak256Hash(
+		creationCode,
+		common.LeftPadBytes(masterCopyInt.Bytes(), 32),
+	)
 
 	safeCreationTx2.ExpectedSafeAddress2 = common.BytesToAddress(
 		eth_crypto.Keccak256(
@@ -192,7 +165,7 @@ func (safeCreationTx2 *SafeCreationTx2) estimateCreationGas2(safeSetupData []byt
 	if err != nil {
 		return 0
 	}
-	chainId, err := safeCreationTx2.ethereumClient.GetChainId()
+	chainId, err := safeCreationTx2.EthereumClient.GetChainId()
 	if err != nil {
 		return 0
 	}
@@ -206,12 +179,12 @@ func (safeCreationTx2 *SafeCreationTx2) estimateCreationGas2(safeSetupData []byt
 		method,
 		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
 		safeSetupData,
-		big.NewInt(safeCreationTx2.saltNonce),
+		big.NewInt(safeCreationTx2.SaltNonce),
 	)
 	if err != nil {
 		return 0
 	}
-	estimatedGas, err := safeCreationTx2.ethereumClient.EstimateGas(
+	estimatedGas, err := safeCreationTx2.EthereumClient.EstimateGas(
 		*randSender,
 		&proxyFactoryAddress,
 		0,
@@ -227,7 +200,7 @@ func (safeCreationTx2 *SafeCreationTx2) estimateCreationGas2(safeSetupData []byt
 	}
 
 	if safeCreationTx2.paymentToken == eth.NULL_ADDRESS {
-		estimatedGasTransfer, err := safeCreationTx2.ethereumClient.EstimateGas(
+		estimatedGasTransfer, err := safeCreationTx2.EthereumClient.EstimateGas(
 			eth.NULL_ADDRESS,
 			&safeCreationTx2.funder,
 			0,

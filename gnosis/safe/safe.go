@@ -155,7 +155,7 @@ func Create(
 		return *new(safe_types.EthereumTxSent), err
 	}
 
-	auth, err := safe_utils.BuildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, nil)
+	auth, err := safe_utils.BuildTransactionWithSigner(sender, privateKey, common.Big0, int64(chainId), int64(nonce), gasPrice, nil)
 	if err != nil {
 		return *new(safe_types.EthereumTxSent), err
 	}
@@ -192,6 +192,78 @@ func Create(
 	}, nil
 }
 
+func CreateWithNonce(
+	sender common.Address,
+	privateKey *ecdsa.PrivateKey,
+	safeCreateTx2 *safecreations.SafeCreationTx2,
+) (*safe_types.EthereumTxSent, error) {
+	/* Get required information for tx building */
+	nonce, chainId, _, gasPrice, err := safe_utils.GetDefaultTxParams(
+		safeCreateTx2.EthereumClient,
+		sender,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	/* Calculate the address that will be deployed to see if it matches with the real one */
+	if safeCreateTx2.ExpectedSafeAddress2 == eth.NULL_ADDRESS {
+		safeCreateTx2.PredictSafeAddress_CREATE2()
+	}
+
+	/* retrieve the ProxyFactory contract and deploy the new Proxy */
+	proxyFactory, err := contracts.NewGnosisSafeProxyFactory(
+		network.NetworkToSafeProxyFactoryAddress[network.GetNetwork(chainId)].Address,
+		safeCreateTx2.EthereumClient.GetGEthClient(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	auth, err := safe_utils.BuildTransactionWithSigner(
+		sender, privateKey, nil, int64(chainId), int64(nonce), gasPrice, nil)
+	if err != nil {
+		return nil, err
+	}
+	auth.GasLimit = safeCreateTx2.CreationGas + 50000
+
+	tx, err := proxyFactory.CreateProxyWithNonce(
+		auth,
+		safeCreateTx2.MasterCopy,
+		safeCreateTx2.GetInitializer2(),
+		big.NewInt(safeCreateTx2.SaltNonce),
+	)
+	if err != nil {
+		return nil, err
+	}
+	ch := safeCreateTx2.EthereumClient.WaitTxConfirmed(tx.Hash())
+	isPending := <-ch
+	if isPending {
+		return nil, fmt.Errorf("safe creation transaction still pending. hash %s", tx.Hash().Hex())
+	}
+	receipt, err := safeCreateTx2.EthereumClient.GetReceipt(tx.Hash().String())
+	if err != nil {
+		return nil, err
+	}
+	if !eth.IsTransactionSuccessful(receipt) {
+		return nil, fmt.Errorf("safe creation FAILED. hash %s", tx.Hash().Hex())
+	}
+	proxyAddress, err := safe_utils.GetProxyCreationResult(proxyFactory, receipt)
+	if err != nil {
+		return nil, fmt.Errorf("safe creation FAILED. proxyAddress not found in receipt")
+	}
+
+	ethTxSent := safe_types.EthereumTxSent{
+		Tx:              tx,
+		ContractAddress: proxyAddress,
+		TxHash:          receipt.TxHash,
+	}
+	if safeCreateTx2.ExpectedSafeAddress2 != proxyAddress {
+		return &ethTxSent, fmt.Errorf("predicted Safe address differs from deployed one")
+	}
+	return &ethTxSent, nil
+}
+
 func DeployMasterContract_v1_3_0(
 	ethereumClient *eth.EthereumClient,
 	sender common.Address,
@@ -216,7 +288,7 @@ func DeployCompatibilityFallbackHandler(
 		return *new(safe_types.EthereumTxSent), err
 	}
 
-	auth, err := safe_utils.BuildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
+	auth, err := safe_utils.BuildTransactionWithSigner(sender, privateKey, common.Big0, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
 	if err != nil {
 		return *new(safe_types.EthereumTxSent), err
 	}

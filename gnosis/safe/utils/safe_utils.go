@@ -48,7 +48,7 @@ func DeployMasterContract(
 		return *new(safe_types.EthereumTxSent), err
 	}
 
-	auth, err := BuildTransactionWithSigner(sender, privateKey, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
+	auth, err := BuildTransactionWithSigner(sender, privateKey, nil, int64(chainId), int64(nonce), gasPrice, estimatedEIP1559Gas)
 	if err != nil {
 		return *new(safe_types.EthereumTxSent), err
 	}
@@ -93,12 +93,14 @@ func GetDefaultTxParams(
 			return 0, 0, nil, nil, err
 		}
 	}
+
 	return nonce, chainId, estimatedEIP1559Gas, gasPrice, nil
 }
 
 func BuildTransactionWithSigner(
 	sender common.Address,
 	privateKey *ecdsa.PrivateKey,
+	value *big.Int,
 	chainId int64,
 	nonce int64,
 	gasPrice *big.Int,
@@ -112,7 +114,7 @@ func BuildTransactionWithSigner(
 	}
 	auth.From = sender
 	auth.Nonce = big.NewInt(int64(nonce))
-	auth.Value = common.Big0
+	auth.Value = value
 	if estimatedEIP1559Gas != nil {
 		auth.GasFeeCap = estimatedEIP1559Gas.GasFeeCap
 		auth.GasTipCap = estimatedEIP1559Gas.GasTipCap

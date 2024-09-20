@@ -1,6 +1,8 @@
 package safecreations_test
 
 import (
+	"math/big"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
@@ -118,7 +120,7 @@ func TestEstimateSafeCreation2(t *testing.T) {
 		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
 		eth.NULL_ADDRESS,
 		eth.NULL_ADDRESS,
-		eth.NULL_ADDRESS, 1.0, 0, 10,
+		eth.NULL_ADDRESS, 1.0, 0, rand.Int64(),
 	)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -139,49 +141,59 @@ func TestPredictSafeAddressWithCREATE2(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	// privateKey, err := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
-	// if err != nil {
-	// 	t.Fatalf(err.Error())
-	// }
+	privateKey, err := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 	var owners []common.Address
 	owners = append(owners, *sender)
 	owners = append(owners, common.HexToAddress(owner2))
 	owners = append(owners, common.HexToAddress(owner3))
 
-	safeCreationTx, err := safecreations.NewSafeCreationTx2(
+	/* Create a new SafeTx2 ->
+	it will estimate creation gas and the eventual refund payment and prepare the initializer
+	*/
+	safeCreationTx2, err := safecreations.NewSafeCreationTx2(
 		ethClient,
 		owners,
 		2,
 		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
 		eth.NULL_ADDRESS,
 		eth.NULL_ADDRESS,
-		eth.NULL_ADDRESS, 1.0, 0, 10,
+		eth.NULL_ADDRESS, 1.0, 0, rand.Int64(),
 	)
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
+	/*it will calculate the Safe address that will be deployed given the provided params and SaltNonce*/
+	safeCreationTx2.PredictSafeAddress_CREATE2()
+	if safeCreationTx2.ExpectedSafeAddress2 == eth.NULL_ADDRESS {
+		t.Fatalf("Could not predict Safe address")
+	}
 
-	safeCreationTx.PredictSafeAddress_CREATE2()
-	t.Log(safeCreationTx.ExpectedSafeAddress2)
+	/* If payment is > 0 fund the future Safe address so that it can pay back the funder, otherwise deploy will fail */
+	if safeCreationTx2.Payment > 0 {
+		gasPrice, _ := ethClient.GasPrice()
+		txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), &safeCreationTx2.ExpectedSafeAddress2, gasPrice, big.NewInt(1e18), 21000)
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+		ch := ethClient.WaitTxConfirmed(txHash)
+		isPending := <-ch
+		if isPending {
+			t.Fatalf("safe creation transaction still pending. hash %s", txHash)
+		}
+	}
 
-	// txSent, err := safe.Create(
-	// 	ethClient,
-	// 	*sender,
-	// 	privateKey,
-	// 	network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
-	// 	owners,
-	// 	2,
-	// 	eth.NULL_ADDRESS,
-	// 	common.HexToAddress("0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"),
-	// 	eth.NULL_ADDRESS,
-	// 	0,
-	// 	eth.NULL_ADDRESS,
-	// )
-	// if err != nil {
-	// 	t.Fatalf(err.Error())
-	// }
+	/* Now deploy a new Safe with the init params and Nonce provided in the safeCreationTx2 obj */
+	// contract address check is made inside the func so we check only if there error
+	ethTxSent, err := safe.CreateWithNonce(*sender, privateKey, safeCreationTx2)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
 
-	// if txSent.ContractAddress.Hex() != safeCreationTx.ExpectedSafeAddress.Hex() {
-	// 	t.Fatalf("Deployed Safe address differs from Predicted Safe address")
-	// }
+	/* Check that the actual deployed Safe coincides with the predicted one */
+	if ethTxSent.ContractAddress != safeCreationTx2.ExpectedSafeAddress2 {
+		t.Fatalf("Deployed Safe address differs from predicted Safe address")
+	}
 }
