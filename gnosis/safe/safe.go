@@ -26,18 +26,18 @@ const GUARD_STORAGE_SLOT = 0x4A204F620C8C5CCDCA3FD54D003BADD85BA500436A431F0CBDA
 var SAFE_MESSAGE_TYPEHASH = common.Hex2Bytes("60b3cbf8b4a223d68d641b3b6ddf9a298e7f33710cf3d3a9d1146b5a6150fbca")
 
 type Safe struct {
-	ethereumClient *eth.EthereumClient
-	safeAddress    *common.Address
-	safeContract   *contracts.GnosisSafe
-	safeAbi        *abi.ABI
-	proxyContract  *contracts.GnosisSafeProxy
-	proxyAddress   *common.Address
+	ethereumClient    *eth.EthereumClient
+	MasterCopyAddress *common.Address
+	SafeContract      *contracts.GnosisSafe
+	safeAbi           *abi.ABI
+	safeAddress       *common.Address
 }
 
 func (safe *Safe) String() string {
-	return "Safe=" + safe.safeAddress.Hex()
+	return "Safe=" + safe.MasterCopyAddress.Hex()
 }
 
+// Initializes a new Safe instance based on an already created Safe address
 func New(safeAddress common.Address, ethClient *eth.EthereumClient) *Safe {
 	/*
 		Instantiates a new Safe object given an already created "Safe" (GnosisSafeProxy)
@@ -53,7 +53,7 @@ func New(safeAddress common.Address, ethClient *eth.EthereumClient) *Safe {
 		return nil
 	}
 	var safeContract *contracts.GnosisSafe
-	safeContract, err = contracts.NewGnosisSafe(masterCopyAddress, ethClient.GetGEthClient())
+	safeContract, err = contracts.NewGnosisSafe(safeAddress, ethClient.GetGEthClient())
 	if err != nil {
 		safeContract = nil
 	}
@@ -62,30 +62,21 @@ func New(safeAddress common.Address, ethClient *eth.EthereumClient) *Safe {
 	if err != nil {
 		safeAbi = nil
 	}
-	var proxyContract *contracts.GnosisSafeProxy
-	proxyContract, err = contracts.NewGnosisSafeProxy(safeAddress, ethClient.GetGEthClient())
-	if err != nil {
-		proxyContract = nil
-	}
 	return &Safe{
-		ethereumClient: ethClient,
-		safeAddress:    &masterCopyAddress,
-		safeContract:   safeContract,
-		safeAbi:        safeAbi,
-		proxyContract:  proxyContract,
-		proxyAddress:   &safeAddress,
+		ethereumClient:    ethClient,
+		MasterCopyAddress: &masterCopyAddress,
+		SafeContract:      safeContract,
+		safeAbi:           safeAbi,
+		safeAddress:       &safeAddress,
 	}
 }
 
+// Retrieve Safe Version
 func (safe *Safe) Version() (string, error) {
-	GnosisSafe, err := contracts.NewGnosisSafe(*safe.safeAddress, safe.ethereumClient.GetGEthClient())
-	if err != nil {
-		return *new(string), err
-	}
-	version, err := GnosisSafe.VERSION(new(bind.CallOpts))
-	return version, err
+	return safe.SafeContract.VERSION(new(bind.CallOpts))
 }
 
+// Retrieve Safe Domain Separator
 func (safe *Safe) DomainSeparator() (common.Hash, error) {
 	GnosisSafe, err := contracts.NewGnosisSafe(*safe.safeAddress, safe.ethereumClient.GetGEthClient())
 	if err != nil {
@@ -95,6 +86,25 @@ func (safe *Safe) DomainSeparator() (common.Hash, error) {
 	return common.BytesToHash(domainSeparator[:]), err
 }
 
+// Retrieve the threshold from the Safe
+func (safe_ *Safe) RetrieveThreshold() (*big.Int, error) {
+	threshold, err := safe_.SafeContract.GetThreshold(nil)
+	if err != nil {
+		return nil, err
+	}
+	return threshold, err
+}
+
+// Retrieve the Safe Nonce
+func (safe_ *Safe) RetrieveNonce() (*big.Int, error) {
+	nonce, err := safe_.SafeContract.Nonce(nil)
+	if err != nil {
+		return nil, err
+	}
+	return nonce, err
+}
+
+// Deploys a new Safe (GnosisSafeProxy) and atomically calls the setup function of the MasterCopy
 func Create(
 	ethereumClient *eth.EthereumClient,
 	sender common.Address,
@@ -192,6 +202,7 @@ func Create(
 	}, nil
 }
 
+// Deploys a new Safe using the CREATE2 OPCODE based on the parameters of the SafeCreationTx2
 func CreateWithNonce(
 	sender common.Address,
 	privateKey *ecdsa.PrivateKey,
@@ -264,17 +275,16 @@ func CreateWithNonce(
 	return &ethTxSent, nil
 }
 
+// Deploys a new v1.3.0 Gnosis Safe Master Copy
 func DeployMasterContract_v1_3_0(
 	ethereumClient *eth.EthereumClient,
 	sender common.Address,
 	privateKey *ecdsa.PrivateKey,
 ) (safe_types.EthereumTxSent, error) {
-	/*
-		Deploys a new v1.3.0 Gnosis Safe Master Copy
-	*/
 	return safe_utils.DeployMasterContract(ethereumClient, sender, privateKey, nil)
 }
 
+// Deploys the Fallback Handler for maintaining compatibility with Safe older versions
 func DeployCompatibilityFallbackHandler(
 	ethereumClient *eth.EthereumClient,
 	sender common.Address,
@@ -307,6 +317,7 @@ func DeployCompatibilityFallbackHandler(
 	}, nil
 }
 
+// Estimates the gas costs needed for a new Safe
 func EstimateSafeCreation(
 	ethereumClient *eth.EthereumClient,
 	owners []common.Address, // Owners of the Safe
@@ -340,4 +351,200 @@ func EstimateSafeCreation(
 	}
 	safeCreationTx.EstimateSafeCreation()
 	return safeCreationTx.CreationGas, gasPrice.Int64(), safeCreationTx.Payment, err
+}
+
+// Estimates the gas costs needed for a new Safe using the CREATE2 OPCODE
+func EstimateSafeCreation2(
+	ethereumClient *eth.EthereumClient,
+	owners []common.Address, // Owners of the Safe
+	threshold int64, // Minimum number of users required to operate the Safe
+	funder common.Address, // Address to refund when the Safe is created. Address(0) if no need to refund
+	paymentToken common.Address, // Payment token instead of paying the funder with ether. If None Ether will be used
+	paymentTokenEthValue float64, // Value of payment token per 1 Ether
+	fixedCreationCost int, // Fixed creation cost of Safe (Wei)
+) (uint64, int64, uint64, error) {
+	chainId, err := ethereumClient.GetChainId()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	gasPrice, err := ethereumClient.GasPrice()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	safeCreationTx2, err := safecreations.NewSafeCreationTx2(
+		ethereumClient,
+		owners,
+		threshold,
+		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
+		eth.NULL_ADDRESS,
+		funder,
+		paymentToken,
+		paymentTokenEthValue,
+		fixedCreationCost,
+		0,
+	)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	safeCreationTx2.EstimateSafeCreation2()
+	return safeCreationTx2.CreationGas, gasPrice.Int64(), safeCreationTx2.Payment, err
+}
+
+// Builds a new SafeCreationTx. It allows to Predict the Safe address that will be deployed, to estimate the creation cost, ...
+func BuildSafeCreationTx(
+	ethereumClient *eth.EthereumClient,
+	owners []common.Address, // Owners of the Safe
+	threshold int64, // Minimum number of users required to operate the Safe
+	masterCopyAddress common.Address,
+	fallbackHandler common.Address,
+	funder common.Address, // Address to refund when the Safe is created. Address(0) if no need to refund
+	paymentToken common.Address, // Payment token instead of paying the funder with ether. If None Ether will be used
+	paymentTokenEthValue float64, // Value of payment token per 1 Ether
+	fixedCreationCost int, // Fixed creation cost of Safe (Wei)
+) (*safecreations.SafeCreationTx, error) {
+	return safecreations.NewSafeCreationTx(
+		ethereumClient,
+		owners,
+		threshold,
+		masterCopyAddress,
+		fallbackHandler,
+		funder,
+		paymentToken,
+		paymentTokenEthValue,
+		fixedCreationCost,
+	)
+}
+
+// Builds a new SafeCreationTx2. It allows to Predict the Safe address that will be deployed, to estimate the creation cost, ...
+func BuildSafeCreationTx2(
+	ethereumClient *eth.EthereumClient,
+	owners []common.Address, // Owners of the Safe
+	threshold int64, // Minimum number of users required to operate the Safe
+	masterCopyAddress common.Address,
+	fallbackHandler common.Address,
+	funder common.Address, // Address to refund when the Safe is created. Address(0) if no need to refund
+	paymentToken common.Address, // Payment token instead of paying the funder with ether. If None Ether will be used
+	paymentTokenEthValue float64, // Value of payment token per 1 Ether
+	fixedCreationCost int, // Fixed creation cost of Safe (Wei)
+	saltNonce int64,
+) (*safecreations.SafeCreationTx2, error) {
+	return safecreations.NewSafeCreationTx2(
+		ethereumClient,
+		owners,
+		threshold,
+		masterCopyAddress,
+		fallbackHandler,
+		funder,
+		paymentToken,
+		paymentTokenEthValue,
+		fixedCreationCost,
+		saltNonce,
+	)
+}
+
+// Check Safe has enough funds to pay for tx
+func (safe_ *Safe) CheckFundsForTxGas(
+	safeTxGas uint64,
+	baseGas uint64,
+	gasPrice int64,
+	gasToken common.Address,
+) (bool, error) {
+	if gasToken == eth.NULL_ADDRESS {
+		balance, err := safe_.ethereumClient.GetBalance(safe_.safeAddress)
+		if err != nil {
+			return false, err
+		}
+		return balance.Uint64() >= (safeTxGas+baseGas)*uint64(gasPrice), nil
+	} else {
+		gasTokenContract, err := contracts.NewERC20(gasToken, safe_.ethereumClient.GetGEthClient())
+		if err != nil {
+			return false, nil
+		}
+		balance, err := gasTokenContract.BalanceOf(nil, *safe_.safeAddress)
+		if err != nil {
+			return false, nil
+		}
+		return balance.Uint64() >= (safeTxGas+baseGas)*uint64(gasPrice), nil
+	}
+}
+
+// Calculate gas costs that are independent of the transaction execution(e.g. base transaction fee,
+// signature check, payment of the refund...)
+func (safe_ *Safe) EstimateTxBaseGas(
+	to common.Address,
+	value uint64,
+	data []byte,
+	operation int,
+	gas_token common.Address,
+	estimated_tx_gas uint64, // gas calculated with `estimate_tx_gas`
+) (uint64, error) {
+	nonce, err := safe_.RetrieveNonce()
+	if err != nil {
+		return 0, err
+	}
+	threshold, err := safe_.RetrieveThreshold()
+	if err != nil {
+		return 0, err
+	}
+	// Every byte == 0 -> 4  Gas
+	// Every byte != 0 -> 16 Gas (68 before Istanbul)
+	// numbers < 256 (0x00(31*2)..ff) are 192 -> 31 * 4 + 1 * GAS_CALL_DATA_BYTE
+	// numbers < 65535 (0x(30*2)..ffff) are 256 -> 30 * 4 + 2 * GAS_CALL_DATA_BYTE
+	// Calculate gas for signatures
+	// (array count (3 -> r, s, v) + ecrecover costs) * signature count
+	// ecrecover for ecdsa ~= 4K gas, we use 6K
+
+	ecrecover_gas := 6000
+	signature_gas := int(threshold.Uint64()) * (1*eth.GAS_CALL_DATA_BYTE + 2*32*eth.GAS_CALL_DATA_BYTE + ecrecover_gas)
+	safe_tx_gas := estimated_tx_gas
+	base_gas := 0
+	gas_price := 1
+	signatures := make([]byte, 0)
+	refund_receiver := eth.NULL_ADDRESS
+
+	method := safe_.safeAbi.Methods["execTransaction"].Name
+	initializer, err := safe_.safeAbi.Pack(
+		method,
+		to,
+		value,
+		data,
+		operation,
+		safe_tx_gas,
+		base_gas,
+		gas_price,
+		gas_token,
+		refund_receiver,
+		signatures,
+	)
+	if err != nil {
+		return 0, err
+	}
+	// If nonce == 0, nonce storage has to be initialized
+	nonce_gas := 5000
+	if nonce == common.Big0 {
+		nonce_gas = 20000
+	}
+	// Keccak costs for the hash of the safe tx
+	hash_generation_gas := 1500
+
+	base_gas = signature_gas + int(safe_.ethereumClient.EstimateDataGas(initializer)) + nonce_gas + hash_generation_gas
+
+	// Add additional gas costs
+	if base_gas > 65536 {
+		base_gas += 64
+	} else {
+		base_gas += 128
+	}
+
+	base_gas += 32000 // Base tx costs, transfer costs...
+	return uint64(base_gas), nil
+}
+
+// TODO
+func (safe_ *Safe) EstimateTxGasWithSafe(
+	to common.Address,
+	value uint64,
+	data []byte,
+	operation int,
+) {
 }

@@ -17,7 +17,7 @@ type SafeCreationTx2 struct {
 	threshold            int64               // Minimum number of users required to operate the Safe
 	MasterCopy           common.Address      // Safe master copy address
 	fallbackHandler      common.Address      // Handler for fallback calls to the Safe
-	funder               common.Address      // Address to refund when the Safe is created. Address(0) if no need to refund
+	Funder               common.Address      // Address to refund when the Safe is created. Address(0) if no need to refund
 	paymentToken         common.Address      // Payment token instead of paying the funder with ether. If None Ether will be used
 	paymentTokenEthValue float64             // Value of payment token per 1 Ether
 	fixedCreationCost    int                 // Fixed creation cost of Safe (Wei)
@@ -49,7 +49,7 @@ func NewSafeCreationTx2(
 		threshold:            threshold,
 		MasterCopy:           masterCopy,
 		fallbackHandler:      fallbackHandler,
-		funder:               funder,
+		Funder:               funder,
 		paymentToken:         paymentToken,
 		paymentTokenEthValue: paymentTokenEthValue,
 		fixedCreationCost:    fixedCreationCost,
@@ -77,11 +77,9 @@ func (safeCreationTx2 *SafeCreationTx2) EstimateSafeCreation2() error {
 	estimated_gas := safeCreationTx2.estimateCreationGas2(safeSetupData)
 	gas := max(calculated_gas, estimated_gas)
 
-	/* if there is a funder set up it means that once deployed the Safe will have to pay back the gas spent by the funder */
-	if safeCreationTx2.funder != eth.NULL_ADDRESS {
-		payment := calculatePayment(safeCreationTx2.fixedCreationCost, safeCreationTx2.paymentTokenEthValue, int64(gas), gasPrice.Int64())
-		safeCreationTx2.Payment = payment
-	}
+	payment := calculatePayment(safeCreationTx2.fixedCreationCost, safeCreationTx2.paymentTokenEthValue, int64(gas), gasPrice.Int64())
+
+	safeCreationTx2.Payment = payment
 	safeCreationTx2.CreationGas = gas
 	return nil
 }
@@ -138,7 +136,7 @@ func (safeCreationTx2 *SafeCreationTx2) GetInitializer2() []byte {
 		safeCreationTx2.Payment,
 		safeCreationTx2.fallbackHandler,
 		safeCreationTx2.paymentToken,
-		safeCreationTx2.funder,
+		safeCreationTx2.Funder,
 	)
 	if err != nil {
 		return nil
@@ -202,7 +200,7 @@ func (safeCreationTx2 *SafeCreationTx2) estimateCreationGas2(safeSetupData []byt
 	if safeCreationTx2.paymentToken == eth.NULL_ADDRESS {
 		estimatedGasTransfer, err := safeCreationTx2.EthereumClient.EstimateGas(
 			eth.NULL_ADDRESS,
-			&safeCreationTx2.funder,
+			&safeCreationTx2.Funder,
 			0,
 			big.NewInt(0),
 			big.NewInt(0),

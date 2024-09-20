@@ -17,6 +17,12 @@ func getInitialSetupSafeData(
 	paymentToken common.Address,
 	paymentReceiver common.Address,
 ) ([]byte, error) {
+
+	refundPayment := big.NewInt(0)
+	if paymentReceiver != eth.NULL_ADDRESS {
+		refundPayment = big.NewInt(int64(payment))
+	}
+
 	/* construct the initialization data needed for the proxy to initialize the Safe */
 	safeAbi, err := contracts.GnosisSafeMetaData.GetAbi()
 	if err != nil {
@@ -31,7 +37,7 @@ func getInitialSetupSafeData(
 		make([]byte, 0),  // Data payload for optional delegate call
 		fallbackHandler,
 		paymentToken,
-		big.NewInt(int64(payment)),
+		refundPayment,
 		paymentReceiver,
 	)
 	if err != nil {

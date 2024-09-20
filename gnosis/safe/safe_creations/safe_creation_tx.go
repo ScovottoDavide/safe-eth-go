@@ -92,10 +92,10 @@ func (safeCreationTx *SafeCreationTx) EstimateSafeCreation() error {
 	estimated_gas := safeCreationTx.estimateCreationGas(*randSender, safeSetupData)
 
 	gas := max(calculated_gas, estimated_gas)
-	if safeCreationTx.funder != eth.NULL_ADDRESS {
-		payment := calculatePayment(safeCreationTx.fixedCreationCost, safeCreationTx.paymentTokenEthValue, int64(gas), gasPrice.Int64())
-		safeCreationTx.Payment = payment
-	}
+
+	payment := calculatePayment(safeCreationTx.fixedCreationCost, safeCreationTx.paymentTokenEthValue, int64(gas), gasPrice.Int64())
+
+	safeCreationTx.Payment = payment
 	safeCreationTx.CreationGas = gas
 	return nil
 }

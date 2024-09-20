@@ -168,7 +168,7 @@ func (ethereumClient *EthereumClient) EstimateGas(
 	return estimatedGas, err
 }
 
-func EstimateDataGas(data []byte) uint64 {
+func (ethereumClient *EthereumClient) EstimateDataGas(data []byte) uint64 {
 	var gas uint64
 
 	for _, d := range data {

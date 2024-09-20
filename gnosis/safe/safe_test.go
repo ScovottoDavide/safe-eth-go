@@ -17,7 +17,7 @@ const HARDHAT_S_KEY0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d
 const owner2 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
 const owner3 = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 
-var uri = eth.NewURI("http://127.0.0.1:8545")
+var uri = eth.NewURI("http://127.0.0.1:8546")
 var ethClient, _ = eth.EthereumClientInit(uri)
 var chainId, _ = ethClient.GetChainId()
 
@@ -85,6 +85,35 @@ func TestSafeVersion(t *testing.T) {
 	}
 	if version == "" {
 		t.Fatalf("Empty version string: %s", version)
+	}
+}
+
+func TestGetThreshold(t *testing.T) {
+	sender, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	privateKey, err := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	newSafe := deploySafe(sender, ethClient, privateKey)
+	if newSafe == eth.NULL_ADDRESS {
+		t.Fatalf("new safe not deployed")
+	}
+
+	safe_ := New(newSafe, ethClient)
+	threshold, err := safe_.RetrieveThreshold()
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	if threshold == nil {
+		t.Fatalf("Could not retrieve threshold")
+	}
+	t.Log(threshold.Uint64())
+	if threshold.Uint64() != 2 {
+		t.Fatalf("Given threshold differs from what expected")
 	}
 }
 

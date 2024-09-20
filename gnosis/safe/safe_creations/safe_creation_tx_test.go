@@ -171,10 +171,11 @@ func TestPredictSafeAddressWithCREATE2(t *testing.T) {
 		t.Fatalf("Could not predict Safe address")
 	}
 
-	/* If payment is > 0 fund the future Safe address so that it can pay back the funder, otherwise deploy will fail */
-	if safeCreationTx2.Payment > 0 {
+	/* If funder is set fund the future Safe address so that it can pay back the funder, otherwise deploy will fail */
+	if safeCreationTx2.Funder != eth.NULL_ADDRESS {
 		gasPrice, _ := ethClient.GasPrice()
-		txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), &safeCreationTx2.ExpectedSafeAddress2, gasPrice, big.NewInt(1e18), 21000)
+		txHash, err := ethClient.SendEthTo(
+			hexutil.EncodeBig(privateKey.D), &safeCreationTx2.ExpectedSafeAddress2, gasPrice, big.NewInt(1e18), 21000)
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
