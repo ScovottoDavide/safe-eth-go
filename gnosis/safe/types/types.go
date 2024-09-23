@@ -10,3 +10,9 @@ type EthereumTxSent struct {
 	Tx              *types.Transaction
 	ContractAddress common.Address
 }
+
+type JsonError interface {
+	Error() string
+	ErrorCode() int
+	ErrorData() interface{}
+}

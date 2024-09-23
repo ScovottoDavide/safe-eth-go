@@ -13,10 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
-/**
-	PRIVATE METHODS
-**/
-
 func GetProxyCreationResult(proxyFactory *contracts.GnosisSafeProxyFactory, receipt *types.Receipt) (common.Address, error) {
 	/*
 		Get the address of the newly deployed GnosisSafeProxy from the receipt (the address is returned by an event)

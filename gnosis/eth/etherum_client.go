@@ -480,6 +480,22 @@ func (ethereumClient *EthereumClient) IsContract(icontractAddress interface{}) (
 	return len(code) > 0, err
 }
 
+func (ethereumClient *EthereumClient) GetCode(icontractAddress interface{}) ([]byte, error) {
+	address, err := TryAnyToAddress(icontractAddress)
+	if err != nil {
+		return nil, err
+	}
+	return ethereumClient.ethereumClient.CodeAt(context.Background(), *address, nil)
+}
+
+func (ethereumClient *EthereumClient) GetStorageAt(icontractAddress interface{}, storageKey common.Hash) ([]byte, error) {
+	address, err := TryAnyToAddress(icontractAddress)
+	if err != nil {
+		return nil, err
+	}
+	return ethereumClient.ethereumClient.StorageAt(context.Background(), *address, storageKey, nil)
+}
+
 func (ethereumClient *EthereumClient) SendUnsignedTransaction(iprivateKey interface{}, tx *types.Transaction) (common.Hash, error) {
 	privateKey, err := GetCryptoPrivateKey(iprivateKey)
 	if err != nil {

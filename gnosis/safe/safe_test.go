@@ -3,10 +3,12 @@ package safe
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/network"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -20,6 +22,9 @@ const owner3 = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
 var uri = eth.NewURI("http://127.0.0.1:8546")
 var ethClient, _ = eth.EthereumClientInit(uri)
 var chainId, _ = ethClient.GetChainId()
+var testSafe = eth.NULL_ADDRESS
+var privateKey, _ = eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
+var signer, _ = bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(int64(chainId)))
 
 func deploySafe(sender *common.Address, ethClient *eth.EthereumClient, privateKey *ecdsa.PrivateKey) common.Address {
 	var owners []common.Address
@@ -57,12 +62,22 @@ func deploySafe(sender *common.Address, ethClient *eth.EthereumClient, privateKe
 	return txSent.ContractAddress
 }
 
-func TestCreateNewSafe(t *testing.T) {
+func createTestSafe() error {
 	sender, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
 	if err != nil {
-		t.Fatalf(err.Error())
+		return err
 	}
-	privateKey, err := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
+
+	newSafe := deploySafe(sender, ethClient, privateKey)
+	if newSafe == eth.NULL_ADDRESS {
+		return err
+	}
+	testSafe = newSafe
+	return nil
+}
+
+func TestCreateNewSafe(t *testing.T) {
+	sender, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -74,7 +89,13 @@ func TestCreateNewSafe(t *testing.T) {
 }
 
 func TestSafeVersion(t *testing.T) {
-	safe := New(common.HexToAddress("0x43E77Ba9F5E59CefB97D55CF58641EBb7bEB22c4"), ethClient)
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+	safe := New(testSafe, ethClient, privateKey)
 	if safe == nil {
 		t.Fatalf("Got nil Safe object")
 	}
@@ -89,21 +110,13 @@ func TestSafeVersion(t *testing.T) {
 }
 
 func TestGetThreshold(t *testing.T) {
-	sender, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
-	if err != nil {
-		t.Fatalf(err.Error())
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
 	}
-	privateKey, err := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-
-	newSafe := deploySafe(sender, ethClient, privateKey)
-	if newSafe == eth.NULL_ADDRESS {
-		t.Fatalf("new safe not deployed")
-	}
-
-	safe_ := New(newSafe, ethClient)
+	safe_ := New(testSafe, ethClient, privateKey)
 	threshold, err := safe_.RetrieveThreshold()
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -118,10 +131,13 @@ func TestGetThreshold(t *testing.T) {
 }
 
 func TestSafeDomainSeparator(t *testing.T) {
-	safe := New(eth.NULL_ADDRESS, ethClient)
-	if safe == nil {
-		t.Fatalf("Got nil Safe object")
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
 	}
+	safe := New(testSafe, ethClient, privateKey)
 
 	domainSeparator, err := safe.DomainSeparator()
 	if err != nil {
@@ -157,10 +173,6 @@ func TestDeployMasterContract_v1_3_0(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	privateKey, err := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
 	ethTxSent, err := DeployMasterContract_v1_3_0(ethClient, *sender, privateKey)
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -186,10 +198,6 @@ func TestDeployMasterContract_v1_3_0(t *testing.T) {
 
 func TestDeployCompatibilityFallbackHandler(t *testing.T) {
 	sender, err := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	privateKey, err := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -236,4 +244,207 @@ func TestEstimateSafeCreation(t *testing.T) {
 	t.Log(payment)
 	/* SafeCreationEstimate from safe-eth-py (gas=394016, gas_price=1875000000, payment=781905000000000,
 	payment_token='0x0000000000000000000000000000000000000000')*/
+}
+
+func TestEstimateTxWithSafe(t *testing.T) {
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+	safe_ := New(testSafe, ethClient, privateKey)
+
+	// we want to estimate the Safe sending 1 eth to this randAddr
+	// so we need to fund the safe
+	randAddr, _ := eth.RandomAddress()
+	balanceBefore, _ := ethClient.GetBalance(safe_)
+
+	gasPrice, _ := ethClient.GasPrice()
+	txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.safeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	ch := ethClient.WaitTxConfirmed(txHash)
+	isPending := <-ch
+	if isPending {
+		t.Fatalf("unexpected pending tx %s", txHash.Hex())
+	}
+
+	balanceAfter, _ := ethClient.GetBalance(safe_.safeAddress)
+
+	if balanceAfter.Uint64() <= balanceBefore.Uint64() {
+		t.Fatalf("did not send 1 eth to randAddr")
+	}
+
+	estimatedGas, err := safe_.EstimateTxGasWithSafe(
+		*randAddr,
+		1e17,
+		nil,
+		0, 0, signer.Signer,
+	)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	if estimatedGas <= 0 {
+		t.Fatalf("could not estimate gas with safe")
+	}
+	t.Log(estimatedGas)
+}
+
+func TestEstimateTxGasWithWeb3(t *testing.T) {
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+	safe_ := New(testSafe, ethClient, privateKey)
+
+	randAddr, _ := eth.RandomAddress()
+
+	balanceBefore, _ := ethClient.GetBalance(safe_)
+	if balanceBefore.Uint64() < 1e17 {
+		gasPrice, _ := ethClient.GasPrice()
+		txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.safeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+		ch := ethClient.WaitTxConfirmed(txHash)
+		isPending := <-ch
+		if isPending {
+			t.Fatalf("unexpected pending tx %s", txHash.Hex())
+		}
+
+		balanceAfter, _ := ethClient.GetBalance(safe_.safeAddress)
+
+		if balanceAfter.Uint64() <= balanceBefore.Uint64() {
+			t.Fatalf("did not send 1 eth to randAddr")
+		}
+	}
+	web3EstimatedGas, err := safe_.EstimateTxGasWithWeb3(
+		*randAddr,
+		1e15,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	if web3EstimatedGas == 0 {
+		t.Fatalf("could not estimate gas with eth node estimateGas method")
+	}
+
+	t.Log(web3EstimatedGas)
+}
+
+func TestEstimateTxGasByTrying(t *testing.T) {
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+	safe_ := New(testSafe, ethClient, privateKey)
+	randAddr, _ := eth.RandomAddress()
+
+	balanceBefore, _ := ethClient.GetBalance(safe_)
+	if balanceBefore.Uint64() < 1e17 {
+		gasPrice, _ := ethClient.GasPrice()
+		txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.safeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+		ch := ethClient.WaitTxConfirmed(txHash)
+		isPending := <-ch
+		if isPending {
+			t.Fatalf("unexpected pending tx %s", txHash.Hex())
+		}
+
+		balanceAfter, _ := ethClient.GetBalance(safe_.safeAddress)
+
+		if balanceAfter.Uint64() <= balanceBefore.Uint64() {
+			t.Fatalf("did not send 1 eth to randAddr")
+		}
+	}
+	EstimatedGas, err := safe_.EstimateTxGasByTrying(
+		*randAddr,
+		1e15,
+		nil,
+		0,
+	)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	if EstimatedGas == 0 {
+		t.Fatalf("could not estimate gas with eth node estimateGas method")
+	}
+
+	t.Log(EstimatedGas)
+}
+
+func TestGetMessageHash(t *testing.T) { // tested with official safe lib using the same Safe. OK!
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+	safe_ := New(testSafe, ethClient, privateKey)
+	_, err := safe_.GetMessageHash("abc")
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+}
+
+func TestRetreiveFallbackHandler(t *testing.T) {
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+	safe_ := New(testSafe, ethClient, privateKey)
+	handler, err := safe_.RetrieveFallbackHandler()
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	if handler != eth.NULL_ADDRESS {
+		t.Fatalf("default safe should not have any fallback handler set")
+	}
+}
+
+func TestRetreiveMastercopyAddress(t *testing.T) {
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+	safe_ := New(testSafe, ethClient, privateKey)
+	mastercopyAddress, err := safe_.RetrieveMastercopyAddress()
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	if mastercopyAddress != network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address {
+		t.Fatalf("mastercopy Address is wrong")
+	}
+}
+
+func TestRetreiveIsHashApproved(t *testing.T) {
+	if testSafe == eth.NULL_ADDRESS {
+		err := createTestSafe()
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+	safe_ := New(testSafe, ethClient, privateKey)
+	isApproved, err := safe_.RetrieveIsHashApproved(eth.NULL_ADDRESS, common.BigToHash(common.Big0).Bytes())
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	if isApproved == true {
+		t.Fatalf("hash should not be approved")
+	}
 }

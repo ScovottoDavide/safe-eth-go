@@ -3,6 +3,7 @@ package safe
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"math"
 	"math/big"
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
@@ -14,16 +15,18 @@ import (
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // keccak256("fallback_manager.handler.address")
-const FALLBACK_HANDLER_STORAGE_SLOT = 0x6C9A6C4A39284E37ED1CF53D337577D14212A4870FB976A4366C693B939918D5
+var FALLBACK_HANDLER_STORAGE_SLOT = common.HexToHash("0x6C9A6C4A39284E37ED1CF53D337577D14212A4870FB976A4366C693B939918D5")
 
 // keccak256("guard_manager.guard.address")
-const GUARD_STORAGE_SLOT = 0x4A204F620C8C5CCDCA3FD54D003BADD85BA500436A431F0CBDA4F558C93C34C8
+var GUARD_STORAGE_SLOT = common.HexToHash("0x4A204F620C8C5CCDCA3FD54D003BADD85BA500436A431F0CBDA4F558C93C34C8")
 
 // keccak256("SafeMessage(bytes message)");
-var SAFE_MESSAGE_TYPEHASH = common.Hex2Bytes("60b3cbf8b4a223d68d641b3b6ddf9a298e7f33710cf3d3a9d1146b5a6150fbca")
+var SAFE_MESSAGE_TYPEHASH = common.HexToHash("0x60b3cbf8b4a223d68d641b3b6ddf9a298e7f33710cf3d3a9d1146b5a6150fbca")
 
 type Safe struct {
 	ethereumClient    *eth.EthereumClient
@@ -31,6 +34,8 @@ type Safe struct {
 	SafeContract      *contracts.GnosisSafe
 	safeAbi           *abi.ABI
 	safeAddress       *common.Address
+	defualtSafeSigner *bind.SignerFn
+	defualtSignerAddr *common.Address
 }
 
 func (safe *Safe) String() string {
@@ -38,7 +43,7 @@ func (safe *Safe) String() string {
 }
 
 // Initializes a new Safe instance based on an already created Safe address
-func New(safeAddress common.Address, ethClient *eth.EthereumClient) *Safe {
+func New(safeAddress common.Address, ethClient *eth.EthereumClient, signerSKey *ecdsa.PrivateKey) *Safe {
 	/*
 		Instantiates a new Safe object given an already created "Safe" (GnosisSafeProxy)
 		This object will allow access to all the other required method to interact with the
@@ -62,46 +67,21 @@ func New(safeAddress common.Address, ethClient *eth.EthereumClient) *Safe {
 	if err != nil {
 		safeAbi = nil
 	}
+
+	signer, err := bind.NewKeyedTransactorWithChainID(signerSKey, big.NewInt(int64(chainId)))
+	if err != nil {
+		return nil
+	}
+	signerAddr := crypto.PubkeyToAddress(signerSKey.PublicKey)
 	return &Safe{
 		ethereumClient:    ethClient,
 		MasterCopyAddress: &masterCopyAddress,
 		SafeContract:      safeContract,
 		safeAbi:           safeAbi,
 		safeAddress:       &safeAddress,
+		defualtSafeSigner: &signer.Signer,
+		defualtSignerAddr: &signerAddr,
 	}
-}
-
-// Retrieve Safe Version
-func (safe *Safe) Version() (string, error) {
-	return safe.SafeContract.VERSION(new(bind.CallOpts))
-}
-
-// Retrieve Safe Domain Separator
-func (safe *Safe) DomainSeparator() (common.Hash, error) {
-	GnosisSafe, err := contracts.NewGnosisSafe(*safe.safeAddress, safe.ethereumClient.GetGEthClient())
-	if err != nil {
-		return *new(common.Hash), err
-	}
-	domainSeparator, err := GnosisSafe.DomainSeparator(new(bind.CallOpts))
-	return common.BytesToHash(domainSeparator[:]), err
-}
-
-// Retrieve the threshold from the Safe
-func (safe_ *Safe) RetrieveThreshold() (*big.Int, error) {
-	threshold, err := safe_.SafeContract.GetThreshold(nil)
-	if err != nil {
-		return nil, err
-	}
-	return threshold, err
-}
-
-// Retrieve the Safe Nonce
-func (safe_ *Safe) RetrieveNonce() (*big.Int, error) {
-	nonce, err := safe_.SafeContract.Nonce(nil)
-	if err != nil {
-		return nil, err
-	}
-	return nonce, err
 }
 
 // Deploys a new Safe (GnosisSafeProxy) and atomically calls the setup function of the MasterCopy
@@ -540,11 +520,262 @@ func (safe_ *Safe) EstimateTxBaseGas(
 	return uint64(base_gas), nil
 }
 
-// TODO
+// Estimate tx gas using safe `requiredTxGas` method
 func (safe_ *Safe) EstimateTxGasWithSafe(
 	to common.Address,
 	value uint64,
 	data []byte,
-	operation int,
-) {
+	operation uint8,
+	gasLimit uint64,
+	signer bind.SignerFn,
+) (uint64, error) {
+	from := *safe_.safeAddress
+	gasPrice := common.Big0
+	if gasLimit > 0 {
+		from = *safe_.defualtSignerAddr
+		gasPrice, _ = safe_.ethereumClient.GasPrice()
+	}
+	_, err := safe_.SafeContract.RequiredTxGas(&bind.TransactOpts{
+		From:     from,
+		GasPrice: gasPrice,
+		GasLimit: gasLimit,
+		Signer:   signer,
+	}, to, big.NewInt(int64(value)), data, operation)
+	if err != nil {
+		jsonErr, ok := err.(safe_types.JsonError)
+		if ok {
+			// it is a Json Error
+			errData := jsonErr.ErrorData().(string)
+			// 4 bytes - error method id
+			// 32 bytes - position
+			// 32 bytes - length
+			// Last 32 bytes - value of revert (if everything went right)
+			gas_estimation_offset := 4 + 32 + 32
+			revertBytes, _ := hexutil.Decode(errData)
+			gas_estimation := revertBytes[gas_estimation_offset:]
+			if len(gas_estimation) != 32 {
+				return 0, fmt.Errorf("cannot estimate tx gas with safe")
+			}
+			estimatedGas := new(big.Int)
+			estimatedGas = estimatedGas.SetBytes(gas_estimation)
+			return estimatedGas.Uint64(), nil
+		} else {
+			return 0, err
+		}
+	}
+	return 0, err
+}
+
+func (safe_ *Safe) EstimateTxGasWithWeb3(
+	to common.Address,
+	value uint64,
+	data []byte,
+) (uint64, error) {
+	return safe_.ethereumClient.EstimateGas(
+		*safe_.safeAddress,
+		&to,
+		0,
+		nil, nil, nil,
+		big.NewInt(int64(value)), data,
+		nil, nil, nil,
+	)
+}
+
+// Try to get an estimation with Safe's `requiredTxGas`. If estimation if successful, try to set a gas limit and
+// estimate again. If gas estimation is ok, same gas estimation should be returned, if it's less than required
+// estimation will not be completed, so estimation was not accurate and gas limit needs to be increased.
+func (safe_ *Safe) EstimateTxGasByTrying(
+	to common.Address,
+	value uint64,
+	data []byte,
+	operation uint8,
+) (uint64, error) {
+	gasEstimated, err := safe_.EstimateTxGasWithSafe(to, value, data, operation, 0, nil)
+	if err != nil {
+		return 0, err
+	}
+	baseGas := safe_.ethereumClient.EstimateDataGas(data)
+
+	for i := range 30 {
+		_, err = safe_.EstimateTxGasWithSafe(to, value, data, operation, gasEstimated+baseGas+32000, *safe_.defualtSafeSigner)
+		if err != nil {
+			blockNum, _ := safe_.ethereumClient.CurrentBlockNumber()
+			_, header, err := safe_.ethereumClient.GetBlockByNumber(big.NewInt(int64(blockNum)), false)
+			if err != nil {
+				return 0, nil
+			}
+			blockGasLimit := header.GasLimit
+			gasEstimated = uint64(math.Floor((1 + float64(i)*0.03) * float64(gasEstimated)))
+			if gasEstimated >= blockGasLimit {
+				return blockGasLimit, nil
+			}
+		}
+	}
+	return gasEstimated, nil
+}
+
+// Estimate tx gas. Use `RequiredTxGas` on the Safe contract and fallbacks to `eth_estimateGas` if that method
+// fails. Note: `eth_estimateGas` cannot estimate delegate calls
+func (safe_ *Safe) EstimateTxGas( // TODO: test this
+	to common.Address,
+	value uint64,
+	data []byte,
+	operation uint8,
+) (uint64, error) {
+	// Costs to route through the proxy and nested calls
+	PROXY_GAS := 1000
+	// https://github.com/ethereum/solidity/blob/dfe3193c7382c80f1814247a162663a97c3f5e67/libsolidity/codegen/ExpressionCompiler.cpp#L1764
+	// This was `false` before solc 0.4.21 -> `m_context.evmVersion().canOverchargeGasForCall()`
+	// So gas needed by caller will be around 35k
+	OLD_CALL_GAS := 35000
+	// Web3 `estimate_gas` estimates less gas
+	WEB3_ESTIMATION_OFFSET := 23000
+	ADDITIONAL_GAS := PROXY_GAS + OLD_CALL_GAS
+
+	estimatedGas, err := safe_.EstimateTxGasByTrying(
+		to, value, data, operation,
+	)
+	if err != nil {
+		web3EstimateGas, err := safe_.EstimateTxGasWithWeb3(
+			to, value, data,
+		)
+		if err != nil {
+			return 0, err
+		}
+		return web3EstimateGas + uint64(ADDITIONAL_GAS) + uint64(WEB3_ESTIMATION_OFFSET), nil
+	}
+	return estimatedGas, nil
+}
+
+// Return hash of a message that can be signed by owners.
+func (safe_ *Safe) GetMessageHash(message interface{}) (*common.Hash, error) {
+	messageHash := *new(common.Hash)
+	switch m := message.(type) {
+	case string:
+		messageHash = crypto.Keccak256Hash([]byte(m))
+	case []byte:
+		messageHash = crypto.Keccak256Hash(m)
+	}
+	bytes32Ty, _ := abi.NewType("bytes32", "bytes32", nil)
+	arguments := abi.Arguments{
+		{
+			Type: bytes32Ty,
+		},
+		{
+			Type: bytes32Ty,
+		},
+	}
+	messageHashPack, err := arguments.Pack(SAFE_MESSAGE_TYPEHASH, messageHash)
+	if err != nil {
+		return nil, err
+	}
+	safeMessageHash := crypto.Keccak256Hash(messageHashPack)
+	domainSeparator, err := safe_.DomainSeparator()
+	if err != nil {
+		return nil, err
+	}
+	res := crypto.Keccak256Hash(
+		[]byte{0x19},
+		[]byte{0x01},
+		domainSeparator.Bytes(),
+		safeMessageHash.Bytes(),
+	)
+	return &res, nil
+}
+
+func (safe_ *Safe) RetrieveAllInfo() {
+	// TODO:
+}
+
+// Retrieve Safe Version
+func (safe *Safe) Version() (string, error) {
+	return safe.SafeContract.VERSION(new(bind.CallOpts))
+}
+
+// Retrieve Safe Domain Separator
+func (safe *Safe) DomainSeparator() (common.Hash, error) {
+	GnosisSafe, err := contracts.NewGnosisSafe(*safe.safeAddress, safe.ethereumClient.GetGEthClient())
+	if err != nil {
+		return *new(common.Hash), err
+	}
+	domainSeparator, err := GnosisSafe.DomainSeparator(new(bind.CallOpts))
+	return common.BytesToHash(domainSeparator[:]), err
+}
+
+// Retrieve the threshold from the Safe
+func (safe_ *Safe) RetrieveThreshold() (*big.Int, error) {
+	threshold, err := safe_.SafeContract.GetThreshold(nil)
+	if err != nil {
+		return nil, err
+	}
+	return threshold, err
+}
+
+// Retrieve the Safe Nonce
+func (safe_ *Safe) RetrieveNonce() (*big.Int, error) {
+	nonce, err := safe_.SafeContract.Nonce(nil)
+	if err != nil {
+		return nil, err
+	}
+	return nonce, err
+}
+
+func (safe_ *Safe) GetCode() ([]byte, error) {
+	return safe_.ethereumClient.GetCode(safe_.safeAddress)
+}
+
+func (safe_ *Safe) RetrieveFallbackHandler() (common.Address, error) {
+	storageSlot, err := safe_.ethereumClient.GetStorageAt(safe_.safeAddress, FALLBACK_HANDLER_STORAGE_SLOT)
+	if err != nil {
+		return eth.NULL_ADDRESS, err
+	}
+	return common.BytesToAddress(storageSlot[len(storageSlot)-20:]), nil
+}
+
+func (safe_ *Safe) RetrieveGuard() (common.Address, error) {
+	storageSlot, err := safe_.ethereumClient.GetStorageAt(safe_.safeAddress, GUARD_STORAGE_SLOT)
+	if err != nil {
+		return eth.NULL_ADDRESS, err
+	}
+	return common.BytesToAddress(storageSlot[len(storageSlot)-20:]), nil
+}
+
+func (safe_ *Safe) RetrieveMastercopyAddress() (common.Address, error) {
+	storageSlot, err := safe_.ethereumClient.GetStorageAt(safe_.safeAddress, common.HexToHash("0x00"))
+	if err != nil {
+		return eth.NULL_ADDRESS, err
+	}
+	return common.BytesToAddress(storageSlot[len(storageSlot)-20:]), nil
+}
+
+func (safe_ *Safe) RetreiveModules() {
+	// TODO:
+}
+
+func (safe_ *Safe) RetrieveIsHashApproved(owner common.Address, safeHash []byte) (bool, error) {
+	res, err := safe_.SafeContract.ApprovedHashes(nil, owner, [32]byte(safeHash))
+	if res.Uint64() == 0 {
+		return false, nil
+	} else if res.Uint64() == 1 {
+		return true, nil
+	}
+	return false, err
+}
+
+func (safe_ *Safe) RetrieveIsMessageSigned(safeHash []byte) (bool, error) {
+	res, err := safe_.SafeContract.SignedMessages(nil, [32]byte(safeHash))
+	if res.Uint64() == 0 {
+		return false, nil
+	} else if res.Uint64() == 1 {
+		return true, nil
+	}
+	return false, err
+}
+
+func (safe_ *Safe) RetrieveIsOwner(owner common.Address) (bool, error) {
+	return safe_.SafeContract.IsOwner(nil, owner)
+}
+
+func (safe_ *Safe) RetrieveOwners() ([]common.Address, error) {
+	return safe_.SafeContract.GetOwners(nil)
 }
