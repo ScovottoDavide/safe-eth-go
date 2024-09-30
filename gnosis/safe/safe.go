@@ -29,11 +29,11 @@ var GUARD_STORAGE_SLOT = common.HexToHash("0x4A204F620C8C5CCDCA3FD54D003BADD85BA
 var SAFE_MESSAGE_TYPEHASH = common.HexToHash("0x60b3cbf8b4a223d68d641b3b6ddf9a298e7f33710cf3d3a9d1146b5a6150fbca")
 
 type Safe struct {
-	ethereumClient    *eth.EthereumClient
+	EthereumClient    *eth.EthereumClient
 	MasterCopyAddress *common.Address
 	SafeContract      *contracts.GnosisSafe
 	safeAbi           *abi.ABI
-	safeAddress       *common.Address
+	SafeAddress       *common.Address
 	defualtSafeSigner *bind.SignerFn
 	defualtSignerAddr *common.Address
 }
@@ -43,7 +43,7 @@ func (safe *Safe) String() string {
 }
 
 // Initializes a new Safe instance based on an already created Safe address
-func New(safeAddress common.Address, ethClient *eth.EthereumClient, signerSKey *ecdsa.PrivateKey) *Safe {
+func New(SafeAddress common.Address, ethClient *eth.EthereumClient, signerSKey *ecdsa.PrivateKey) *Safe {
 	/*
 		Instantiates a new Safe object given an already created "Safe" (GnosisSafeProxy)
 		This object will allow access to all the other required method to interact with the
@@ -58,7 +58,7 @@ func New(safeAddress common.Address, ethClient *eth.EthereumClient, signerSKey *
 		return nil
 	}
 	var safeContract *contracts.GnosisSafe
-	safeContract, err = contracts.NewGnosisSafe(safeAddress, ethClient.GetGEthClient())
+	safeContract, err = contracts.NewGnosisSafe(SafeAddress, ethClient.GetGEthClient())
 	if err != nil {
 		safeContract = nil
 	}
@@ -74,11 +74,11 @@ func New(safeAddress common.Address, ethClient *eth.EthereumClient, signerSKey *
 	}
 	signerAddr := crypto.PubkeyToAddress(signerSKey.PublicKey)
 	return &Safe{
-		ethereumClient:    ethClient,
+		EthereumClient:    ethClient,
 		MasterCopyAddress: &masterCopyAddress,
 		SafeContract:      safeContract,
 		safeAbi:           safeAbi,
-		safeAddress:       &safeAddress,
+		SafeAddress:       &SafeAddress,
 		defualtSafeSigner: &signer.Signer,
 		defualtSignerAddr: &signerAddr,
 	}
@@ -430,17 +430,17 @@ func (safe_ *Safe) CheckFundsForTxGas(
 	gasToken common.Address,
 ) (bool, error) {
 	if gasToken == eth.NULL_ADDRESS {
-		balance, err := safe_.ethereumClient.GetBalance(safe_.safeAddress)
+		balance, err := safe_.EthereumClient.GetBalance(safe_.SafeAddress)
 		if err != nil {
 			return false, err
 		}
 		return balance.Uint64() >= (safeTxGas+baseGas)*uint64(gasPrice), nil
 	} else {
-		gasTokenContract, err := contracts.NewERC20(gasToken, safe_.ethereumClient.GetGEthClient())
+		gasTokenContract, err := contracts.NewERC20(gasToken, safe_.EthereumClient.GetGEthClient())
 		if err != nil {
 			return false, nil
 		}
-		balance, err := gasTokenContract.BalanceOf(nil, *safe_.safeAddress)
+		balance, err := gasTokenContract.BalanceOf(nil, *safe_.SafeAddress)
 		if err != nil {
 			return false, nil
 		}
@@ -507,7 +507,7 @@ func (safe_ *Safe) EstimateTxBaseGas(
 	// Keccak costs for the hash of the safe tx
 	hash_generation_gas := 1500
 
-	base_gas = signature_gas + int(safe_.ethereumClient.EstimateDataGas(initializer)) + nonce_gas + hash_generation_gas
+	base_gas = signature_gas + int(safe_.EthereumClient.EstimateDataGas(initializer)) + nonce_gas + hash_generation_gas
 
 	// Add additional gas costs
 	if base_gas > 65536 {
@@ -529,11 +529,11 @@ func (safe_ *Safe) EstimateTxGasWithSafe(
 	gasLimit uint64,
 	signer bind.SignerFn,
 ) (uint64, error) {
-	from := *safe_.safeAddress
+	from := *safe_.SafeAddress
 	gasPrice := common.Big0
 	if gasLimit > 0 {
 		from = *safe_.defualtSignerAddr
-		gasPrice, _ = safe_.ethereumClient.GasPrice()
+		gasPrice, _ = safe_.EthereumClient.GasPrice()
 	}
 	_, err := safe_.SafeContract.RequiredTxGas(&bind.TransactOpts{
 		From:     from,
@@ -571,8 +571,8 @@ func (safe_ *Safe) EstimateTxGasWithWeb3(
 	value uint64,
 	data []byte,
 ) (uint64, error) {
-	return safe_.ethereumClient.EstimateGas(
-		*safe_.safeAddress,
+	return safe_.EthereumClient.EstimateGas(
+		*safe_.SafeAddress,
 		&to,
 		0,
 		nil, nil, nil,
@@ -594,13 +594,13 @@ func (safe_ *Safe) EstimateTxGasByTrying(
 	if err != nil {
 		return 0, err
 	}
-	baseGas := safe_.ethereumClient.EstimateDataGas(data)
+	baseGas := safe_.EthereumClient.EstimateDataGas(data)
 
 	for i := range 30 {
 		_, err = safe_.EstimateTxGasWithSafe(to, value, data, operation, gasEstimated+baseGas+32000, *safe_.defualtSafeSigner)
 		if err != nil {
-			blockNum, _ := safe_.ethereumClient.CurrentBlockNumber()
-			_, header, err := safe_.ethereumClient.GetBlockByNumber(big.NewInt(int64(blockNum)), false)
+			blockNum, _ := safe_.EthereumClient.CurrentBlockNumber()
+			_, header, err := safe_.EthereumClient.GetBlockByNumber(big.NewInt(int64(blockNum)), false)
 			if err != nil {
 				return 0, nil
 			}
@@ -694,7 +694,7 @@ func (safe *Safe) Version() (string, error) {
 
 // Retrieve Safe Domain Separator
 func (safe *Safe) DomainSeparator() (common.Hash, error) {
-	GnosisSafe, err := contracts.NewGnosisSafe(*safe.safeAddress, safe.ethereumClient.GetGEthClient())
+	GnosisSafe, err := contracts.NewGnosisSafe(*safe.SafeAddress, safe.EthereumClient.GetGEthClient())
 	if err != nil {
 		return *new(common.Hash), err
 	}
@@ -721,11 +721,11 @@ func (safe_ *Safe) RetrieveNonce() (*big.Int, error) {
 }
 
 func (safe_ *Safe) GetCode() ([]byte, error) {
-	return safe_.ethereumClient.GetCode(safe_.safeAddress)
+	return safe_.EthereumClient.GetCode(safe_.SafeAddress)
 }
 
 func (safe_ *Safe) RetrieveFallbackHandler() (common.Address, error) {
-	storageSlot, err := safe_.ethereumClient.GetStorageAt(safe_.safeAddress, FALLBACK_HANDLER_STORAGE_SLOT)
+	storageSlot, err := safe_.EthereumClient.GetStorageAt(safe_.SafeAddress, FALLBACK_HANDLER_STORAGE_SLOT)
 	if err != nil {
 		return eth.NULL_ADDRESS, err
 	}
@@ -733,7 +733,7 @@ func (safe_ *Safe) RetrieveFallbackHandler() (common.Address, error) {
 }
 
 func (safe_ *Safe) RetrieveGuard() (common.Address, error) {
-	storageSlot, err := safe_.ethereumClient.GetStorageAt(safe_.safeAddress, GUARD_STORAGE_SLOT)
+	storageSlot, err := safe_.EthereumClient.GetStorageAt(safe_.SafeAddress, GUARD_STORAGE_SLOT)
 	if err != nil {
 		return eth.NULL_ADDRESS, err
 	}
@@ -741,7 +741,7 @@ func (safe_ *Safe) RetrieveGuard() (common.Address, error) {
 }
 
 func (safe_ *Safe) RetrieveMastercopyAddress() (common.Address, error) {
-	storageSlot, err := safe_.ethereumClient.GetStorageAt(safe_.safeAddress, common.HexToHash("0x00"))
+	storageSlot, err := safe_.EthereumClient.GetStorageAt(safe_.SafeAddress, common.HexToHash("0x00"))
 	if err != nil {
 		return eth.NULL_ADDRESS, err
 	}

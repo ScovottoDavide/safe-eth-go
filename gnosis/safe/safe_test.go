@@ -261,7 +261,7 @@ func TestEstimateTxWithSafe(t *testing.T) {
 	balanceBefore, _ := ethClient.GetBalance(safe_)
 
 	gasPrice, _ := ethClient.GasPrice()
-	txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.safeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
+	txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.SafeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -271,7 +271,7 @@ func TestEstimateTxWithSafe(t *testing.T) {
 		t.Fatalf("unexpected pending tx %s", txHash.Hex())
 	}
 
-	balanceAfter, _ := ethClient.GetBalance(safe_.safeAddress)
+	balanceAfter, _ := ethClient.GetBalance(safe_.SafeAddress)
 
 	if balanceAfter.Uint64() <= balanceBefore.Uint64() {
 		t.Fatalf("did not send 1 eth to randAddr")
@@ -306,7 +306,7 @@ func TestEstimateTxGasWithWeb3(t *testing.T) {
 	balanceBefore, _ := ethClient.GetBalance(safe_)
 	if balanceBefore.Uint64() < 1e17 {
 		gasPrice, _ := ethClient.GasPrice()
-		txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.safeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
+		txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.SafeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
@@ -316,7 +316,7 @@ func TestEstimateTxGasWithWeb3(t *testing.T) {
 			t.Fatalf("unexpected pending tx %s", txHash.Hex())
 		}
 
-		balanceAfter, _ := ethClient.GetBalance(safe_.safeAddress)
+		balanceAfter, _ := ethClient.GetBalance(safe_.SafeAddress)
 
 		if balanceAfter.Uint64() <= balanceBefore.Uint64() {
 			t.Fatalf("did not send 1 eth to randAddr")
@@ -350,7 +350,7 @@ func TestEstimateTxGasByTrying(t *testing.T) {
 	balanceBefore, _ := ethClient.GetBalance(safe_)
 	if balanceBefore.Uint64() < 1e17 {
 		gasPrice, _ := ethClient.GasPrice()
-		txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.safeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
+		txHash, err := ethClient.SendEthTo(hexutil.EncodeBig(privateKey.D), safe_.SafeAddress, gasPrice, big.NewInt(1e18), uint64(3000000))
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
@@ -360,7 +360,7 @@ func TestEstimateTxGasByTrying(t *testing.T) {
 			t.Fatalf("unexpected pending tx %s", txHash.Hex())
 		}
 
-		balanceAfter, _ := ethClient.GetBalance(safe_.safeAddress)
+		balanceAfter, _ := ethClient.GetBalance(safe_.SafeAddress)
 
 		if balanceAfter.Uint64() <= balanceBefore.Uint64() {
 			t.Fatalf("did not send 1 eth to randAddr")

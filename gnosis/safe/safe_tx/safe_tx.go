@@ -1,15 +1,19 @@
-package safe_tx
+package safetx
 
 import (
+	"crypto/ecdsa"
+	"fmt"
 	"math/big"
+	"slices"
+	"sort"
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/contracts"
 	safesignature "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/safe_signature"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
@@ -18,12 +22,12 @@ type SafeTx struct {
 	SafeAddress    common.Address
 	SafeContract   *contracts.GnosisSafe
 	To             common.Address
-	Value          big.Int
+	Value          *big.Int
 	Data           []byte
 	Operation      uint8
-	SafeTxGas      big.Int
-	BaseGas        big.Int
-	GasPrice       big.Int
+	SafeTxGas      *big.Int
+	BaseGas        *big.Int
+	GasPrice       *big.Int
 	GasToken       common.Address
 	RefundReceiver common.Address
 	Signatures     []byte
@@ -32,23 +36,24 @@ type SafeTx struct {
 	ChainId        int
 	Tx             *types.Transaction // set if `SafeTx` is executed
 	TxHash         *common.Hash       // set if `SafeTx` is executed
+	Signers        []common.Address
 }
 
 func New(
 	ethereumClient *eth.EthereumClient,
 	safeAddress common.Address,
 	to common.Address,
-	value big.Int,
+	value *big.Int,
 	data []byte,
 	operation uint8,
-	safeTxGas big.Int,
-	baseGas big.Int,
-	gasPrice big.Int,
+	safeTxGas *big.Int,
+	baseGas *big.Int,
+	gasPrice *big.Int,
 	gasToken common.Address,
 	refundReceiver common.Address,
-	signatures []byte,
 	safeNonce *big.Int,
-	safeVersion *string,
+	signatures []byte,
+	safeVersion string,
 ) *SafeTx {
 	chainId, err := ethereumClient.GetChainId()
 	if err != nil {
@@ -64,9 +69,9 @@ func New(
 			return nil
 		}
 	}
-	if safeVersion == nil {
+	if safeVersion == "" {
 		safeVersion_, err := safeContract.VERSION(nil)
-		safeVersion = &safeVersion_
+		safeVersion = safeVersion_
 		if err != nil {
 			return nil
 		}
@@ -86,21 +91,22 @@ func New(
 		RefundReceiver: refundReceiver,
 		Signatures:     signatures,
 		SafeNonce:      safeNonce,
-		SafeVersion:    *safeVersion,
+		SafeVersion:    safeVersion,
 		ChainId:        chainId,
 		Tx:             nil,
 		TxHash:         nil,
+		Signers:        nil,
 	}
 }
 
 // only for Version >= 1.3.0
 func (safeTx *SafeTx) EIP712StructuredData() apitypes.TypedData {
 	types := apitypes.Types{
-		"EIP712Domain": {
+		"EIP712Domain": []apitypes.Type{
 			{Name: "chainId", Type: "uint256"},
 			{Name: "verifyingContract", Type: "address"},
 		},
-		"SafeTx": {
+		"SafeTx": []apitypes.Type{
 			{Name: "to", Type: "address"},
 			{Name: "value", Type: "uint256"},
 			{Name: "data", Type: "bytes"},
@@ -118,16 +124,16 @@ func (safeTx *SafeTx) EIP712StructuredData() apitypes.TypedData {
 		VerifyingContract: safeTx.SafeAddress.Hex(),
 	}
 	message := apitypes.TypedDataMessage{
-		"to":             safeTx.To,
-		"value":          safeTx.Value,
+		"to":             safeTx.To.Hex(),
+		"value":          safeTx.Value.String(),
 		"data":           safeTx.Data,
-		"operation":      safeTx.Operation,
-		"safeTxGas":      safeTx.SafeTxGas,
-		"baseGas":        safeTx.BaseGas,
-		"gasPrice":       safeTx.GasPrice,
-		"gasToken":       safeTx.GasToken,
-		"refundReceiver": safeTx.RefundReceiver,
-		"nonce":          safeTx.SafeNonce,
+		"operation":      fmt.Sprintf("%d", safeTx.Operation),
+		"safeTxGas":      fmt.Sprintf("%#d", safeTx.SafeTxGas),
+		"baseGas":        fmt.Sprintf("%#d", safeTx.BaseGas),
+		"gasPrice":       safeTx.GasPrice.String(),
+		"gasToken":       safeTx.GasToken.Hex(),
+		"refundReceiver": safeTx.RefundReceiver.Hex(),
+		"nonce":          fmt.Sprintf("%d", safeTx.SafeNonce.Uint64()),
 	}
 	typedData := apitypes.TypedData{
 		Types:       types,
@@ -138,16 +144,17 @@ func (safeTx *SafeTx) EIP712StructuredData() apitypes.TypedData {
 	return typedData
 }
 
-func (safeTx *SafeTx) SafeTxHash() (hexutil.Bytes, error) {
+func (safeTx *SafeTx) SafeTxHash() (common.Hash, error) {
 	typedData := safeTx.EIP712StructuredData()
 	messageHash, err := typedData.HashStruct("SafeTx", typedData.Message)
 	if err != nil {
-		return nil, err
+		return *new(common.Hash), err
 	}
-	return messageHash, nil
+	return common.BytesToHash(messageHash), nil
 }
 
-func (safeTx *SafeTx) Signers() []common.Address {
+// Get signers of the Safe Tx by parsing the signatures
+func (safeTx *SafeTx) GetSignersFromSignatures() []common.Address {
 	if len(safeTx.Signatures) == 0 {
 		return nil
 	}
@@ -156,9 +163,87 @@ func (safeTx *SafeTx) Signers() []common.Address {
 	if err != nil {
 		return nil
 	}
-	signatures := safesignature.ParseSignatures[safesignature.SafeSignatureContract](
+	signatures := safesignature.ParseSignature(
 		safeTx.Signatures,
-		safe_tx_hash,
+		safe_tx_hash.Bytes(),
 	)
-	return nil
+	signers := make([]common.Address, len(signatures))
+	for i := 0; i < len(signatures); i++ {
+		switch signatures[i].(type) {
+		case safesignature.SafeSignatureContract:
+			signature := signatures[i].(safesignature.SafeSignatureContract)
+			signers = append(signers, *signature.Owner())
+		case safesignature.SafeSignatureApprovedHash:
+			signature := signatures[i].(safesignature.SafeSignatureApprovedHash)
+			signers = append(signers, *signature.Owner())
+		case safesignature.SafeSignatureEOA:
+			signature := signatures[i].(safesignature.SafeSignatureEOA)
+			signers = append(signers, *signature.Owner())
+		case *safesignature.SafeSignatureEthSign:
+			signature := signatures[i].(safesignature.SafeSignatureEthSign)
+			signers = append(signers, *signature.Owner())
+		}
+	}
+	safeTx.Signers = signers
+
+	return safeTx.Signers
+}
+
+func (safeTx *SafeTx) SortedSigners() []common.Address {
+	sort.Slice(safeTx.Signers, func(i, j int) bool {
+		return safeTx.Signers[i].Big().Uint64() < safeTx.Signers[j].Big().Uint64()
+	})
+	return safeTx.Signers
+}
+
+//func (safeTx *SafeTx) W3Tx() {
+//	safeTx.SafeContract.ExecTransaction(
+//
+//	)
+//}
+
+//func (safeTx *SafeTx) Call() {
+//
+//}
+
+// Recommended gas to use on the ethereum_tx
+func (safeTx *SafeTx) RecommendedGas() uint64 {
+	recommendedGas := new(big.Int)
+	recommendedGas = recommendedGas.Add(safeTx.BaseGas, safeTx.SafeTxGas)
+	return recommendedGas.Uint64() + 75000
+}
+
+//func (safeTx *SafeTx) Execute() {
+//
+//}
+
+func (safeTx *SafeTx) Sign(privateKey *ecdsa.PrivateKey) ([]byte, error) {
+	_safe_hash, err := safeTx.SafeTxHash()
+	if err != nil {
+		return nil, err
+	}
+	signature, err := crypto.Sign(_safe_hash.Bytes(), privateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	address, err := eth.AddressFromPrivKey(privateKey.D.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(safeTx.signerToHex(), address.Hex()) {
+		newOwners := append(safeTx.Signers, *address)
+		newOwnerPos := slices.Index(newOwners, *address)
+		safeTx.Signatures = append(safeTx.Signatures[:65*newOwnerPos], signature...)
+		safeTx.Signatures = append(safeTx.Signatures, safeTx.Signatures[65*newOwnerPos:]...)
+	}
+	return signature, nil
+}
+
+func (safeTx *SafeTx) signerToHex() []string {
+	var hexSigners []string
+	for i := 0; i < len(safeTx.Signers); i++ {
+		hexSigners = append(hexSigners, safeTx.Signers[i].Hex())
+	}
+	return hexSigners
 }

@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
+	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/contracts"
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 )
@@ -43,34 +46,31 @@ type SafeSignatureContract struct {
 }
 
 type SafeSignatureApprovedHash struct {
-	safeSignature     *safeSignature_
-	contractSignature []byte
+	safeSignature *safeSignature_
 }
 
 type SafeSignatureEthSign struct {
-	safeSignature     *safeSignature_
-	contractSignature []byte
+	safeSignature *safeSignature_
 }
 
 type SafeSignatureEOA struct {
-	safeSignature     *safeSignature_
-	contractSignature []byte
+	safeSignature *safeSignature_
 }
 
 type SafeSignature interface {
-	SafeSignatureContract | SafeSignatureApprovedHash | SafeSignatureEthSign | SafeSignatureEOA
+	// SafeSignatureContract | SafeSignatureApprovedHash | SafeSignatureEthSign | SafeSignatureEOA
 }
 
-func ParseSignatures[T SafeSignature](
+func ParseSignature(
 	signatures []byte,
 	safeTxHash []byte,
-) []T {
+) []SafeSignature {
 	if signatures == nil {
 		return nil
 	}
 
 	dataPosition := len(signatures) // For contract signatures, to stop parsing at data position
-	var safeSignatures []T
+	var safeSignatures []SafeSignature
 	// var safe_signature T
 	for i := 0; i < len(signatures); i += SignatureSize {
 		if i >= dataPosition { // If contract signature data position is reached, stop
@@ -85,6 +85,7 @@ func ParseSignatures[T SafeSignature](
 			return nil
 		}
 		signatureType := SigTypeFromV(v.Uint64())
+		var safe_signature SafeSignature
 		if signatureType == CONTRACT_SIGNATURE {
 			s_int := int(s.Uint64())
 			if s_int < dataPosition {
@@ -93,38 +94,38 @@ func ParseSignatures[T SafeSignature](
 			contract_signature_len := int(new(big.Int).SetBytes(signatures[s_int : s_int+32]).Uint64()) // Len size is 32 bytes
 			contract_signature := signatures[s_int+32 : s_int+32+contract_signature_len]                // Skip array size (32 bytes)
 			fmt.Println(contract_signature)
-			safe_signature := SafeSignatureContract{
+			safe_signature = SafeSignatureContract{
 				&safeSignature_{
 					signature:  signature,
 					safeTxHash: safeTxHash,
 				}, contract_signature,
 			}
-			safeSignatures = append(safeSignatures, T(safe_signature))
+			//safeSignatures = append(safeSignatures, T(safe_signature))
 		} else if signatureType == APPROVED_HASH {
-			safe_signature := SafeSignatureApprovedHash{
+			safe_signature = SafeSignatureApprovedHash{
 				&safeSignature_{
 					signature:  signature,
 					safeTxHash: safeTxHash,
-				}, nil,
+				},
 			}
-			safeSignatures = append(safeSignatures, T(safe_signature))
+			//safeSignatures = append(safeSignatures, safe_signature)
 		} else if signatureType == ETH_SIGN {
-			safe_signature := SafeSignatureEthSign{
+			safe_signature = SafeSignatureEthSign{
 				&safeSignature_{
 					signature:  signature,
 					safeTxHash: safeTxHash,
-				}, nil,
+				},
 			}
-			safeSignatures = append(safeSignatures, T(safe_signature))
+			//safeSignatures = append(safeSignatures, safe_signature)
 		} else if signatureType == EOA {
-			safe_signature := SafeSignatureEOA{
+			safe_signature = SafeSignatureEOA{
 				&safeSignature_{
 					signature:  signature,
 					safeTxHash: safeTxHash,
-				}, nil,
+				},
 			}
-			safeSignatures = append(safeSignatures, T(safe_signature))
 		}
+		safeSignatures = append(safeSignatures, safe_signature)
 	}
 	return safeSignatures
 }
@@ -141,25 +142,95 @@ func signatureSplit(signatures []byte, pos int) (*big.Int, *big.Int, *big.Int, e
 	return v, r, s, nil
 }
 
-func (signature *SafeSignatureEOA) Owner() (*common.Address, error) {
+func (signature *SafeSignatureEOA) Owner() *common.Address {
 	pubKey, err := crypto.SigToPub(signature.safeSignature.safeTxHash, signature.safeSignature.signature)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 	addr := crypto.PubkeyToAddress(*pubKey)
-	return &addr, nil
+	return &addr
+}
+func (signaure *SafeSignatureEOA) IsValid() bool {
+	return true
+}
+func (signaure *SafeSignatureEOA) SignatureType() SafeSignatureType {
+	return EOA
 }
 
-func (signature *SafeSignatureEthSign) Owner() (*common.Address, error) {
+func (signature *SafeSignatureEthSign) Owner() *common.Address {
 	pubKey, err := crypto.SigToPub(signature.safeSignature.safeTxHash, signature.safeSignature.signature)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 	addr := crypto.PubkeyToAddress(*pubKey)
-	return &addr, nil
+	return &addr
+}
+func (signaure *SafeSignatureEthSign) IsValid() bool {
+	return true
+}
+func (signaure *SafeSignatureEthSign) SignatureType() SafeSignatureType {
+	return ETH_SIGN
 }
 
-func (signature *SafeSignatureApprovedHash) Owner() (*common.Address, error) {
-	// TODO: uint_to_address
-	return nil, nil
+func (signature *SafeSignatureApprovedHash) Owner() *common.Address {
+	// TODO: Test uint_to_address
+	return uintToAddress(signature.safeSignature.r)
+}
+func (signaure *SafeSignatureApprovedHash) SignatureType() SafeSignatureType {
+	return APPROVED_HASH
+}
+func (signature *SafeSignatureApprovedHash) IsValid(
+	ethClient *eth.EthereumClient,
+	safeContract *contracts.GnosisSafe,
+) bool {
+	res, err := safeContract.ApprovedHashes(
+		nil, *signature.Owner(), common.BytesToHash(signature.safeSignature.safeTxHash))
+	if err != nil {
+		return false
+	}
+	return res.Uint64() == 1
+}
+
+func (signature *SafeSignatureContract) Owner() *common.Address {
+	// TODO: Test uint_to_address
+	return uintToAddress(signature.safeSignature.r)
+}
+func (signaure *SafeSignatureContract) SignatureType() SafeSignatureType {
+	return CONTRACT_SIGNATURE
+}
+func (signaure *SafeSignatureContract) IsValid() bool {
+	return false
+}
+
+// Convert a Solidity `uint` value to a checksummed `address`, removing invalid padding bytes if present
+func uintToAddress(value *big.Int) *common.Address {
+	uintTy, err := abi.NewType("uint", "uint", nil)
+	if err != nil {
+		return nil
+	}
+	addressTy, err := abi.NewType("address", "address", nil)
+	if err != nil {
+		return nil
+	}
+	arguments := abi.Arguments{
+		{
+			Type: uintTy,
+		},
+	}
+	encoded, err := arguments.Pack(value)
+	if err != nil {
+		return nil
+	}
+	encoded_without_padding := append([]byte{0x00 * 12}, encoded[20:]...)
+	arguments = abi.Arguments{
+		{
+			Type: addressTy,
+		},
+	}
+	decoded, err := arguments.Unpack(encoded_without_padding)
+	if err != nil {
+		return nil
+	}
+	address_b := common.BytesToAddress(decoded[0].([]byte))
+	return &address_b
 }
