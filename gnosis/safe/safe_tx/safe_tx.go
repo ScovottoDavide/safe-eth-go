@@ -217,6 +217,8 @@ func (safeTx *SafeTx) RecommendedGas() uint64 {
 //
 //}
 
+// Signs the Safe Transaction and adds (in order) the signature to the SafeTx::Signature byte array and updates
+// the SafeTx::Signers common.Address array
 func (safeTx *SafeTx) Sign(privateKey *ecdsa.PrivateKey) ([]byte, error) {
 	_safe_hash, err := safeTx.SafeTxHash()
 	if err != nil {
@@ -232,10 +234,9 @@ func (safeTx *SafeTx) Sign(privateKey *ecdsa.PrivateKey) ([]byte, error) {
 		return nil, err
 	}
 	if !slices.Contains(safeTx.signerToHex(), address.Hex()) {
-		newOwners := append(safeTx.Signers, *address)
-		newOwnerPos := slices.Index(newOwners, *address)
-		safeTx.Signatures = append(safeTx.Signatures[:65*newOwnerPos], signature...)
-		safeTx.Signatures = append(safeTx.Signatures, safeTx.Signatures[65*newOwnerPos:]...)
+		safeTx.Signers = append(safeTx.Signers, *address)
+		newOwnerPos := slices.Index(safeTx.SortedSigners(), *address)
+		safeTx.Signatures = append(safeTx.Signatures[:65*newOwnerPos], append(signature, safeTx.Signatures[65*newOwnerPos:]...)...)
 	}
 	return signature, nil
 }
