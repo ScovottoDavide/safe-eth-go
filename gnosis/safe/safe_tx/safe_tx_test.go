@@ -58,7 +58,7 @@ func TestSafeTxHash(t *testing.T) {
 		*safe_.SafeAddress,
 		common.HexToAddress("0x5AC255889882aaB35A2aa939679E3F3d4Cea221E"),
 		big.NewInt(5212459),
-		[]byte{0x00},
+		make([]byte, 0),
 		1,
 		big.NewInt(123456),
 		big.NewInt(122),
@@ -80,10 +80,6 @@ func TestSafeTxHash(t *testing.T) {
 	}
 }
 
-func TestAnvil(t *testing.T) {
-	chainId, err := testcommon.EthClient.GetChainId()
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	t.Log(chainId)
+func TestSignaturesAndSigner() {
+
 }

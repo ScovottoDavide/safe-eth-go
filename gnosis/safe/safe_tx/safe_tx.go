@@ -120,8 +120,8 @@ func (safeTx *SafeTx) EIP712StructuredData() apitypes.TypedData {
 		},
 	}
 	dataDomain := apitypes.TypedDataDomain{
-		ChainId:           math.NewHexOrDecimal256(int64(safeTx.ChainId)),
 		VerifyingContract: safeTx.SafeAddress.Hex(),
+		ChainId:           math.NewHexOrDecimal256(int64(safeTx.ChainId)),
 	}
 	message := apitypes.TypedDataMessage{
 		"to":             safeTx.To.Hex(),
@@ -146,7 +146,7 @@ func (safeTx *SafeTx) EIP712StructuredData() apitypes.TypedData {
 
 func (safeTx *SafeTx) SafeTxHash() (common.Hash, error) {
 	typedData := safeTx.EIP712StructuredData()
-	messageHash, err := typedData.HashStruct("SafeTx", typedData.Message)
+	messageHash, _, err := apitypes.TypedDataAndHash(typedData)
 	if err != nil {
 		return *new(common.Hash), err
 	}
