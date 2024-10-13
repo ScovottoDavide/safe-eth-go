@@ -13,7 +13,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/signer/core/apitypes"
 )
 
@@ -172,16 +171,16 @@ func (safeTx *SafeTx) GetSignersFromSignatures() []common.Address {
 		switch signatures[i].(type) {
 		case safesignature.SafeSignatureContract:
 			signature := signatures[i].(safesignature.SafeSignatureContract)
-			signers = append(signers, *signature.Owner())
+			signers[i] = *signature.Owner()
 		case safesignature.SafeSignatureApprovedHash:
 			signature := signatures[i].(safesignature.SafeSignatureApprovedHash)
-			signers = append(signers, *signature.Owner())
+			signers[i] = *signature.Owner()
 		case safesignature.SafeSignatureEOA:
 			signature := signatures[i].(safesignature.SafeSignatureEOA)
-			signers = append(signers, *signature.Owner())
+			signers[i] = *signature.Owner()
 		case *safesignature.SafeSignatureEthSign:
 			signature := signatures[i].(safesignature.SafeSignatureEthSign)
-			signers = append(signers, *signature.Owner())
+			signers[i] = *signature.Owner()
 		}
 	}
 
@@ -223,7 +222,7 @@ func (safeTx *SafeTx) Sign(privateKey *ecdsa.PrivateKey) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	signature, err := crypto.Sign(_safe_hash.Bytes(), privateKey)
+	signature, err := safesignature.SignMessageHash(_safe_hash, privateKey)
 	if err != nil {
 		return nil, err
 	}

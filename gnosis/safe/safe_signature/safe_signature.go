@@ -1,6 +1,7 @@
 package safe_signature
 
 import (
+	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 
@@ -35,7 +36,6 @@ func SigTypeFromV(v uint64) SafeSignatureType {
 }
 
 type safeSignature_ struct {
-	signature  []byte
 	safeTxHash []byte
 	v, r, s    *big.Int
 }
@@ -76,12 +76,8 @@ func ParseSignature(
 		if i >= dataPosition { // If contract signature data position is reached, stop
 			break
 		}
-		signature := signatures[i : i+SignatureSize]
-		v, r, s, err := signatureSplit(signature, 0)
+		v, r, s, err := SplitAndValidateSignature(signatures, i/SignatureSize)
 		if err != nil {
-			return nil
-		}
-		if !crypto.ValidateSignatureValues(v.Bytes()[0], r, s, false) {
 			return nil
 		}
 		signatureType := SigTypeFromV(v.Uint64())
@@ -96,32 +92,40 @@ func ParseSignature(
 			fmt.Println(contract_signature)
 			safe_signature = SafeSignatureContract{
 				&safeSignature_{
-					signature:  signature,
 					safeTxHash: safeTxHash,
+					v:          v,
+					r:          r,
+					s:          s,
 				}, contract_signature,
 			}
 			//safeSignatures = append(safeSignatures, T(safe_signature))
 		} else if signatureType == APPROVED_HASH {
 			safe_signature = SafeSignatureApprovedHash{
 				&safeSignature_{
-					signature:  signature,
 					safeTxHash: safeTxHash,
+					v:          v,
+					r:          r,
+					s:          s,
 				},
 			}
 			//safeSignatures = append(safeSignatures, safe_signature)
 		} else if signatureType == ETH_SIGN {
 			safe_signature = SafeSignatureEthSign{
 				&safeSignature_{
-					signature:  signature,
 					safeTxHash: safeTxHash,
+					v:          v,
+					r:          r,
+					s:          s,
 				},
 			}
 			//safeSignatures = append(safeSignatures, safe_signature)
 		} else if signatureType == EOA {
 			safe_signature = SafeSignatureEOA{
 				&safeSignature_{
-					signature:  signature,
 					safeTxHash: safeTxHash,
+					v:          v,
+					r:          r,
+					s:          s,
 				},
 			}
 		}
@@ -138,12 +142,36 @@ func signatureSplit(signatures []byte, pos int) (*big.Int, *big.Int, *big.Int, e
 
 	r := new(big.Int).SetBytes(signatures[signaturePos : 32+signaturePos])
 	s := new(big.Int).SetBytes(signatures[32+signaturePos : 64+signaturePos])
-	v := new(big.Int).SetBytes(signatures[:64+signaturePos])
+	v := new(big.Int).SetBytes(signatures[64+signaturePos : crypto.RecoveryIDOffset+signaturePos+1])
+	return v, r, s, nil
+}
+
+func SignMessageHash(hash common.Hash, sKey *ecdsa.PrivateKey) ([]byte, error) {
+	signature, err := crypto.Sign(hash.Bytes(), sKey)
+	if err != nil {
+		return nil, err
+	}
+
+	signature[crypto.RecoveryIDOffset] += 27
+	return signature, nil
+}
+
+func SplitAndValidateSignature(signature []byte, pos int) (*big.Int, *big.Int, *big.Int, error) {
+	v, r, s, err := signatureSplit(signature, pos)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if !crypto.ValidateSignatureValues(byte(big.NewInt(v.Int64()-27).Int64()), r, s, false) {
+		return nil, nil, nil, err
+	}
 	return v, r, s, nil
 }
 
 func (signature *SafeSignatureEOA) Owner() *common.Address {
-	pubKey, err := crypto.SigToPub(signature.safeSignature.safeTxHash, signature.safeSignature.signature)
+	_sig := SigFromVRS(signature.safeSignature.v, signature.safeSignature.r, signature.safeSignature.s)
+	_sig[crypto.RecoveryIDOffset] -= 27
+	pubKey, err := crypto.SigToPub(signature.safeSignature.safeTxHash, _sig)
 	if err != nil {
 		return nil
 	}
@@ -158,7 +186,9 @@ func (signaure *SafeSignatureEOA) SignatureType() SafeSignatureType {
 }
 
 func (signature *SafeSignatureEthSign) Owner() *common.Address {
-	pubKey, err := crypto.SigToPub(signature.safeSignature.safeTxHash, signature.safeSignature.signature)
+	_sig := SigFromVRS(signature.safeSignature.v, signature.safeSignature.r, signature.safeSignature.s)
+	_sig[crypto.RecoveryIDOffset] -= 27
+	pubKey, err := crypto.SigToPub(signature.safeSignature.safeTxHash, _sig)
 	if err != nil {
 		return nil
 	}
@@ -233,4 +263,11 @@ func uintToAddress(value *big.Int) *common.Address {
 	}
 	address_b := common.BytesToAddress(decoded[0].([]byte))
 	return &address_b
+}
+
+func SigFromVRS(v, r, s *big.Int) []byte {
+	if v == nil || r == nil || s == nil {
+		return nil
+	}
+	return append(r.Bytes(), append(s.Bytes(), v.Bytes()...)...)
 }

@@ -53,22 +53,8 @@ func TestSafeTxHash(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 
-	safeTx := safetx.New(
-		safe_.EthereumClient,
-		*safe_.SafeAddress,
-		common.HexToAddress("0x5AC255889882aaB35A2aa939679E3F3d4Cea221E"),
-		big.NewInt(5212459),
-		make([]byte, 0),
-		1,
-		big.NewInt(123456),
-		big.NewInt(122),
-		big.NewInt(12345),
-		eth.NULL_ADDRESS,
-		eth.NULL_ADDRESS,
-		big.NewInt(10789),
-		nil,
-		"1.3.0",
-	)
+	safeTx := newDefaultSafeTx()
+
 	safeTxHash, err := safeTx.SafeTxHash()
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -84,22 +70,7 @@ func TestSignaturesAndSigner(t *testing.T) {
 	tearDownTest := setupTest(t)
 	defer tearDownTest(t)
 
-	safeTx := safetx.New(
-		safe_.EthereumClient,
-		*safe_.SafeAddress,
-		common.HexToAddress("0x5AC255889882aaB35A2aa939679E3F3d4Cea221E"),
-		big.NewInt(5212459),
-		make([]byte, 0),
-		1,
-		big.NewInt(123456),
-		big.NewInt(122),
-		big.NewInt(12345),
-		eth.NULL_ADDRESS,
-		eth.NULL_ADDRESS,
-		big.NewInt(10789),
-		nil,
-		"1.3.0",
-	)
+	safeTx := newDefaultSafeTx()
 
 	owner0_sk, _ := eth.GetCryptoPrivateKey("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
 	owner1_sk, _ := eth.GetCryptoPrivateKey("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
@@ -132,4 +103,41 @@ func TestSignaturesAndSigner(t *testing.T) {
 	if !slices.Equal(expectedSignersOrder, safeTx.Signers) {
 		t.Errorf("signers are not ordered as expected")
 	}
+}
+
+func TestGetSignersFromSignatures(t *testing.T) {
+	tearDownTest := setupTest(t)
+	defer tearDownTest(t)
+
+	safeTx := newDefaultSafeTx()
+
+	owner0_sk, _ := eth.GetCryptoPrivateKey("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+	owner1_sk, _ := eth.GetCryptoPrivateKey("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
+	safeTx.Sign(owner0_sk)
+	safeTx.Sign(owner1_sk)
+
+	signersFromSigs := safeTx.GetSignersFromSignatures()
+
+	if !slices.Equal(signersFromSigs, safeTx.Signers) {
+		t.Errorf("signers are extracted from signatures are not as expected")
+	}
+}
+
+func newDefaultSafeTx() *safetx.SafeTx {
+	return safetx.New(
+		safe_.EthereumClient,
+		*safe_.SafeAddress,
+		common.HexToAddress("0x5AC255889882aaB35A2aa939679E3F3d4Cea221E"),
+		big.NewInt(5212459),
+		make([]byte, 0),
+		1,
+		big.NewInt(123456),
+		big.NewInt(122),
+		big.NewInt(12345),
+		eth.NULL_ADDRESS,
+		eth.NULL_ADDRESS,
+		big.NewInt(10789),
+		nil,
+		"1.3.0",
+	)
 }
