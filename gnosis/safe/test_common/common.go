@@ -3,63 +3,146 @@ package testcommon
 import (
 	"crypto/ecdsa"
 	"fmt"
+	"log"
+	"math/big"
+	"os"
+	"path/filepath"
+	"runtime"
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/network"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/safe"
+	safecreations "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/safe_creations"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/joho/godotenv"
 )
 
-const HARDHAT_S_KEY0 = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
-const owner2 = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8"
-const owner3 = "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC"
-
-var uri = eth.NewURI("http://127.0.0.1:8545")
-var EthClient, _ = eth.EthereumClientInit(uri)
-var chainId, _ = EthClient.GetChainId()
-var PrivateKey, _ = eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
-var Sender, _ = eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
-
-func CreateTestSafe() *common.Address {
-	return deploySafe(Sender, EthClient, PrivateKey)
+func envPath() string {
+	_, b, _, _ := runtime.Caller(0)
+	root := filepath.Join(filepath.Dir(b), "../../../")
+	return filepath.Join(root, ".env")
 }
 
-func deploySafe(sender *common.Address, ethClient *eth.EthereumClient, privateKey *ecdsa.PrivateKey) *common.Address {
+func loadEnv() {
+	env := envPath()
+	err := godotenv.Load(env)
+	if err != nil {
+		log.Fatalf("Error loading .env file")
+	}
+}
+
+func CreateTestSafe() (*common.Address, *eth.EthereumClient, *ecdsa.PrivateKey) {
+	loadEnv()
+
+	ethClient := EthClient()
+	sender, sKey := SenderAccount()
+
+	defaultSafeAddress := os.Getenv("DEFAULT_SAFE_ADDRESS")
+	isContract, err := ethClient.IsContract(defaultSafeAddress)
+	if err != nil {
+		panic(err)
+	}
+	if !isContract {
+		fmt.Println("Creating new Safe")
+		safeAddr := deployPredicatbleSafe(ethClient, sender, sKey)
+		return safeAddr, ethClient, sKey
+	}
+	fmt.Println("Default Safe already deployed...")
+	safeAddr := common.HexToAddress(defaultSafeAddress)
+	return &safeAddr, ethClient, sKey
+}
+
+func deployPredicatbleSafe(ethClient *eth.EthereumClient, sender *common.Address, sKey *ecdsa.PrivateKey) *common.Address {
+	owner2 := Owner2()
+	owner3 := Owner3()
+
+	chainId, _ := ethClient.GetChainId()
+
 	var owners []common.Address
 	owners = append(owners, *sender)
-	owners = append(owners, common.HexToAddress(owner2))
-	owners = append(owners, common.HexToAddress(owner3))
-	txSent, err := safe.Create(
+	owners = append(owners, *owner2)
+	owners = append(owners, *owner3)
+	safeCreationTx2, err := safecreations.NewSafeCreationTx2(
 		ethClient,
-		*sender,
-		privateKey,
-		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
 		owners,
 		2,
+		network.NetworkToMasterCopyAddress[network.GetNetwork(chainId)].Address,
 		eth.NULL_ADDRESS,
-		common.HexToAddress("0xa6B71E26C5e0845f74c812102Ca7114b6a896AB2"),
 		eth.NULL_ADDRESS,
-		0,
-		eth.NULL_ADDRESS,
+		eth.NULL_ADDRESS, 1.0, 0, 1,
 	)
 	if err != nil {
-		return nil
+		panic(err)
 	}
-	if txSent.ContractAddress == eth.NULL_ADDRESS {
-		return nil
+	safeCreationTx2.PredictSafeAddress_CREATE2()
+	if safeCreationTx2.ExpectedSafeAddress2 == eth.NULL_ADDRESS {
+		panic("Could not predict Safe address")
 	}
-	ch := ethClient.WaitTxConfirmed(txSent.TxHash)
-	isPending := <-ch
-	if isPending {
-		fmt.Printf("unexpected pending tx %s", txSent.TxHash.Hex())
+
+	/* If funder is set fund the future Safe address so that it can pay back the funder, otherwise deploy will fail */
+	if safeCreationTx2.Funder != eth.NULL_ADDRESS {
+		gasPrice, _ := ethClient.GasPrice()
+		txHash, err := ethClient.SendEthTo(
+			hexutil.EncodeBig(sKey.D), &safeCreationTx2.ExpectedSafeAddress2, gasPrice, big.NewInt(1e18), 21000)
+		if err != nil {
+			panic(err.Error())
+		}
+		ch := ethClient.WaitTxConfirmed(txHash)
+		isPending := <-ch
+		if isPending {
+			panic("safe creation transaction still pending")
+		}
 	}
-	receipt, err := ethClient.GetReceipt(txSent.TxHash.Hex())
+
+	/* Now deploy a new Safe with the init params and Nonce provided in the safeCreationTx2 obj */
+	// contract address check is made inside the func so we check only if there error
+	ethTxSent, err := safe.CreateWithNonce(*sender, sKey, safeCreationTx2)
 	if err != nil {
-		return nil
+		panic(err.Error())
 	}
-	fmt.Println("Used gas: ", receipt.GasUsed)
-	// fmt.Println("Safe creation payment: ", receipt.GasUsed*receipt.EffectiveGasPrice.Uint64())
-	fmt.Println(txSent.ContractAddress.Hex())
-	return &txSent.ContractAddress
+
+	/* Check that the actual deployed Safe coincides with the predicted one */
+	if ethTxSent.ContractAddress != safeCreationTx2.ExpectedSafeAddress2 {
+		panic("Deployed Safe address differs from predicted Safe address")
+	}
+	fmt.Println(ethTxSent.ContractAddress)
+	return &ethTxSent.ContractAddress
+}
+
+func SenderAccount() (*common.Address, *ecdsa.PrivateKey) {
+	loadEnv()
+	HARDHAT_S_KEY0 := os.Getenv("HARDHAT_S_KEY0")
+	sender, _ := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	sKey, _ := eth.GetCryptoPrivateKey(HARDHAT_S_KEY0)
+	return sender, sKey
+}
+
+func Sender() *common.Address {
+	loadEnv()
+	HARDHAT_S_KEY0 := os.Getenv("HARDHAT_S_KEY0")
+	sender, _ := eth.AddressFromPrivKey(hexutil.MustDecode(HARDHAT_S_KEY0))
+	return sender
+}
+
+func EthClient() *eth.EthereumClient {
+	loadEnv()
+	ethereumNodeUrl := os.Getenv("ETHEREUM_NODE_URL")
+	if ethereumNodeUrl == "" {
+		panic("empty ethereum node url")
+	}
+	ethClient, _ := eth.EthereumClientInit(eth.NewURI(ethereumNodeUrl))
+	return ethClient
+}
+
+func Owner2() *common.Address {
+	loadEnv()
+	owner2 := common.HexToAddress(os.Getenv("OWNER_2"))
+	return &owner2
+}
+
+func Owner3() *common.Address {
+	loadEnv()
+	owner3 := common.HexToAddress(os.Getenv("OWNER_3"))
+	return &owner3
 }

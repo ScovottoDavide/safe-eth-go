@@ -184,9 +184,8 @@ func (safeTx *SafeTx) GetSignersFromSignatures() []common.Address {
 			signers = append(signers, *signature.Owner())
 		}
 	}
-	safeTx.Signers = signers
 
-	return safeTx.Signers
+	return signers
 }
 
 func (safeTx *SafeTx) SortedSigners() []common.Address {
