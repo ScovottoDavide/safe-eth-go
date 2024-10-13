@@ -33,7 +33,7 @@ type SafeTx struct {
 	SafeNonce      *big.Int
 	SafeVersion    string
 	ChainId        int
-	Tx             *types.Transaction // set if `SafeTx` is executed
+	Tx             *types.Transaction // set if `SafeTx` is executed/prepared
 	TxHash         *common.Hash       // set if `SafeTx` is executed
 	Signers        []common.Address
 }
@@ -157,7 +157,6 @@ func (safeTx *SafeTx) GetSignersFromSignatures() []common.Address {
 	if len(safeTx.Signatures) == 0 {
 		return nil
 	}
-	// TODO: parse signatures, get the owner for each one and return the array
 	safe_tx_hash, err := safeTx.SafeTxHash()
 	if err != nil {
 		return nil
@@ -194,15 +193,52 @@ func (safeTx *SafeTx) SortedSigners() []common.Address {
 	return safeTx.Signers
 }
 
-//func (safeTx *SafeTx) W3Tx() {
-//	safeTx.SafeContract.ExecTransaction(
-//
-//	)
-//}
+func (safeTx *SafeTx) Raw() ([]byte, error) {
+	safeABI, err := contracts.GnosisSafeMetaData.GetAbi()
+	if err != nil {
+		return nil, err
+	}
+	method := safeABI.Methods["execTransaction"].Name
+	execTransactionRaw, err := safeABI.Pack(
+		method,
+		safeTx.To,
+		safeTx.Value,
+		safeTx.Data,
+		safeTx.Operation,
+		safeTx.SafeTxGas,
+		safeTx.BaseGas,
+		safeTx.GasPrice,
+		safeTx.GasToken,
+		safeTx.RefundReceiver,
+		safeTx.Signatures,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return execTransactionRaw, nil
+}
 
-//func (safeTx *SafeTx) Call() {
-//
-//}
+// Call executes a `ExecTransaction` transaction, which is directly executed in the VM
+// of the node, but never mined into the blockchain. Can be used to simulate the outcome of the
+// prepared SafeTx.
+func (safeTx *SafeTx) Call(senderAddr common.Address, txGas uint64) error {
+	safeTxRaw, err := safeTx.Raw()
+	if err != nil {
+		return err
+	}
+	res, err := safeTx.EthereumClient.CallContract(
+		senderAddr,
+		&safeTx.To,
+		txGas,
+		safeTx.Value,
+		safeTxRaw,
+	)
+	if err != nil {
+		return err
+	}
+	fmt.Println("execTransaction call result: ", res)
+	return nil
+}
 
 // Recommended gas to use on the ethereum_tx
 func (safeTx *SafeTx) RecommendedGas() uint64 {
@@ -211,9 +247,11 @@ func (safeTx *SafeTx) RecommendedGas() uint64 {
 	return recommendedGas.Uint64() + 75000
 }
 
-//func (safeTx *SafeTx) Execute() {
-//
-//}
+// func (safeTx *SafeTx) Execute() {
+// 	safeTx.SafeContract.ExecTransaction(
+
+// 	)
+// }
 
 // Signs the Safe Transaction and adds (in order) the signature to the SafeTx::Signature byte array and updates
 // the SafeTx::Signers common.Address array
@@ -231,7 +269,7 @@ func (safeTx *SafeTx) Sign(privateKey *ecdsa.PrivateKey) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !slices.Contains(safeTx.signerToHex(), address.Hex()) {
+	if !slices.Contains(safeTx.signersToHex(), address.Hex()) {
 		safeTx.Signers = append(safeTx.Signers, *address)
 		newOwnerPos := slices.Index(safeTx.SortedSigners(), *address)
 		safeTx.Signatures = append(safeTx.Signatures[:65*newOwnerPos], append(signature, safeTx.Signatures[65*newOwnerPos:]...)...)
@@ -239,7 +277,7 @@ func (safeTx *SafeTx) Sign(privateKey *ecdsa.PrivateKey) ([]byte, error) {
 	return signature, nil
 }
 
-func (safeTx *SafeTx) signerToHex() []string {
+func (safeTx *SafeTx) signersToHex() []string {
 	var hexSigners []string
 	for i := 0; i < len(safeTx.Signers); i++ {
 		hexSigners = append(hexSigners, safeTx.Signers[i].Hex())

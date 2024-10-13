@@ -744,3 +744,29 @@ func (ethereumClient *EthereumClient) DeployAndInitializeContract(
 	}
 	return newContractTxHash, newContractTx, contractAddress, nil
 }
+
+func (ethereumClient *EthereumClient) CallContract(
+	From common.Address, // the sender of the 'transaction'
+	To *common.Address, // the destination contract (nil for contract creation)
+	Gas uint64, // if 0, the call executes with near-infinite gas
+	Value *big.Int, // amount of wei sent along with the call
+	Data []byte, // input data, usually an ABI-encoded contract method invocation
+) ([]byte, error) {
+	callMsg := ethereum.CallMsg{
+		From:  From,
+		To:    To,
+		Gas:   Gas,
+		Value: Value,
+		Data:  Data,
+	}
+	if ethereumClient.IsEip1559Supported() {
+		ethereumClient.SetEip1559Fee(&callMsg, network.Normal)
+	} else {
+		gasPrice, err := ethereumClient.GasPrice()
+		if err != nil {
+			return nil, err
+		}
+		callMsg.GasPrice = gasPrice
+	}
+	return ethereumClient.ethereumClient.CallContract(context.Background(), callMsg, nil)
+}
