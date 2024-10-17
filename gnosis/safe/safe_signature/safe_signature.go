@@ -57,9 +57,7 @@ type SafeSignatureEOA struct {
 	safeSignature *safeSignature_
 }
 
-type SafeSignature interface {
-	// SafeSignatureContract | SafeSignatureApprovedHash | SafeSignatureEthSign | SafeSignatureEOA
-}
+type SafeSignature interface{}
 
 func ParseSignature(
 	signatures []byte,

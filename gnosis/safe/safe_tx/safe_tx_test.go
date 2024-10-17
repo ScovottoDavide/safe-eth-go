@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
+	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/contracts"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/safe"
 	safetx "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/safe_tx"
 	testcommon "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/test_common"
@@ -123,6 +124,32 @@ func TestGetSignersFromSignatures(t *testing.T) {
 	}
 }
 
+func TestRawTx(t *testing.T) {
+	tearDownTest := setupTest(t)
+	defer tearDownTest(t)
+
+	safeTx := newDefaultSafeTx()
+
+	safeTxRaw, err := safeTx.Raw()
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	// t.Log(common.Bytes2Hex(safeTxRaw))
+	// t.Log(len(safeTxRaw))
+
+	abi, err := contracts.GnosisSafeMetaData.GetAbi()
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+
+	method := abi.Methods["execTransaction"]
+	unpackedArgs, err := method.Inputs.Unpack(safeTxRaw[4:])
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	t.Log(unpackedArgs...)
+}
+
 func newDefaultSafeTx() *safetx.SafeTx {
 	return safetx.New(
 		safe_.EthereumClient,
@@ -141,3 +168,7 @@ func newDefaultSafeTx() *safetx.SafeTx {
 		"1.3.0",
 	)
 }
+
+// 6a76120200000000000000000000000000000000000000000000000000000000
+// 0000000000000000000000005ac255889882aab35a2aa939679e3f3d4cea221e00
+// 000000000000000000000000000000000000000000000000000000004f892b00000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001e240000000000000000000000000000000000000000000000000000000000000007a000000000000000000000000000000000000000000000000000000000000303900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000

@@ -215,6 +215,8 @@ func (safeTx *SafeTx) Raw() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// execTransactionRaw = append(execTransactionRaw[:4], append(make([]byte, 28), execTransactionRaw[4:]...)...)
 	return execTransactionRaw, nil
 }
 
