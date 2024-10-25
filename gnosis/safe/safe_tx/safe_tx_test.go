@@ -134,8 +134,6 @@ func TestRawTx(t *testing.T) {
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
-	// t.Log(common.Bytes2Hex(safeTxRaw))
-	// t.Log(len(safeTxRaw))
 
 	abi, err := contracts.GnosisSafeMetaData.GetAbi()
 	if err != nil {
@@ -148,6 +146,39 @@ func TestRawTx(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 	t.Log(unpackedArgs...)
+}
+
+func TestSafeTxEstimate(t *testing.T) {
+	tearDownTest := setupTest(t)
+	defer tearDownTest(t)
+
+	safeTx := newDefaultSafeTx()
+
+	owner0_sk, _ := eth.GetCryptoPrivateKey("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80")
+	owner1_sk, _ := eth.GetCryptoPrivateKey("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d")
+	safeTx.Sign(owner0_sk)
+	safeTx.Sign(owner1_sk)
+
+	gas_price, err := safeTx.EthereumClient.GasPrice()
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	amount_to_transfer := eth.ToWei(10, 18)
+	txHash, err := safeTx.EthereumClient.SendEthTo(
+		"0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+		&safeTx.SafeAddress,
+		gas_price, amount_to_transfer,
+		21000,
+	)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	t.Log(txHash)
+
+	safeTx.Call(
+		safeTx.Signers[0],
+		0,
+	)
 }
 
 func newDefaultSafeTx() *safetx.SafeTx {
@@ -168,7 +199,3 @@ func newDefaultSafeTx() *safetx.SafeTx {
 		"1.3.0",
 	)
 }
-
-// 6a76120200000000000000000000000000000000000000000000000000000000
-// 0000000000000000000000005ac255889882aab35a2aa939679e3f3d4cea221e00
-// 000000000000000000000000000000000000000000000000000000004f892b00000000000000000000000000000000000000000000000000000000000001400000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000001e240000000000000000000000000000000000000000000000000000000000000007a000000000000000000000000000000000000000000000000000000000000303900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000

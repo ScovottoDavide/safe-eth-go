@@ -9,7 +9,9 @@ import (
 
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth"
 	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/contracts"
+	"github.com/ScovottoDavide/safe-eth-go/gnosis/eth/network"
 	safesignature "github.com/ScovottoDavide/safe-eth-go/gnosis/safe/safe_signature"
+	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
@@ -215,8 +217,6 @@ func (safeTx *SafeTx) Raw() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// execTransactionRaw = append(execTransactionRaw[:4], append(make([]byte, 28), execTransactionRaw[4:]...)...)
 	return execTransactionRaw, nil
 }
 
@@ -228,6 +228,7 @@ func (safeTx *SafeTx) Call(senderAddr common.Address, txGas uint64) error {
 	if err != nil {
 		return err
 	}
+
 	res, err := safeTx.EthereumClient.CallContract(
 		senderAddr,
 		&safeTx.To,
@@ -249,11 +250,59 @@ func (safeTx *SafeTx) RecommendedGas() uint64 {
 	return recommendedGas.Uint64() + 75000
 }
 
-// func (safeTx *SafeTx) Execute() {
-// 	safeTx.SafeContract.ExecTransaction(
+func (safeTx *SafeTx) Execute(
+	privateKey *ecdsa.PrivateKey, // Sender private key
+	txGas *uint64, // Gas for the external tx. If not, `(safeTxGas + baseGas) * 2` will be used
+	txGasPrice *big.Int, // Gas price of the external tx. If not, `gas_price` will be used
+	txNonce *big.Int, // Force nonce for `tx_sender`
+	eip1559Speed *network.TxSpeed, // If provided, use EIP1559 transaction
+) error {
+	signer, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(int64(safeTx.ChainId)))
+	if err != nil {
+		return err
+	}
+	var gasLimit uint64
+	if txGas == nil {
+		gasLimit = safeTx.RecommendedGas()
+	}
 
-// 	)
-// }
+	eip1559EstimateGas := new(eth.EIP1559EstimatedGas)
+	if eip1559Speed != nil && safeTx.EthereumClient.IsEip1559Supported() {
+		eip1559EstimateGas, err = safeTx.EthereumClient.EstimateFeeEip1559(*eip1559Speed)
+		if err != nil {
+			return err
+		}
+		txGasPrice = nil
+	} else {
+		eip1559EstimateGas = nil
+	}
+
+	safeTx.SafeContract.ExecTransaction(
+		&bind.TransactOpts{
+			Signer:    signer.Signer,
+			Nonce:     txNonce,
+			GasLimit:  gasLimit,
+			GasPrice:  txGasPrice,
+			GasFeeCap: eip1559EstimateGas.GasFeeCap,
+			GasTipCap: eip1559EstimateGas.GasTipCap,
+		},
+		safeTx.To,
+		safeTx.Value,
+		safeTx.Data,
+		safeTx.Operation,
+		safeTx.SafeTxGas,
+		safeTx.BaseGas,
+		txGasPrice,
+		safeTx.GasToken,
+		safeTx.RefundReceiver,
+		safeTx.Signatures,
+	)
+
+	// Set signatures empty after executing the tx. `Nonce` is increased even if it fails,
+	// so signatures are not valid anymore
+	safeTx.Signatures = nil
+	return nil
+}
 
 // Signs the Safe Transaction and adds (in order) the signature to the SafeTx::Signature byte array and updates
 // the SafeTx::Signers common.Address array
@@ -277,6 +326,10 @@ func (safeTx *SafeTx) Sign(privateKey *ecdsa.PrivateKey) ([]byte, error) {
 		safeTx.Signatures = append(safeTx.Signatures[:65*newOwnerPos], append(signature, safeTx.Signatures[65*newOwnerPos:]...)...)
 	}
 	return signature, nil
+}
+
+func (safeTx *SafeTx) Unsign() {
+
 }
 
 func (safeTx *SafeTx) signersToHex() []string {
