@@ -13,12 +13,13 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 )
 
+/*
+Get the address of the newly deployed GnosisSafeProxy from the receipt (the address is returned by an event)
+The ParseProxyCreation catches the following event:
+
+	`event ProxyCreation(GnosisSafeProxy proxy, address singleton);`
+*/
 func GetProxyCreationResult(proxyFactory *contracts.GnosisSafeProxyFactory, receipt *types.Receipt) (common.Address, error) {
-	/*
-		Get the address of the newly deployed GnosisSafeProxy from the receipt (the address is returned by an event)
-		The ParseProxyCreation catches the following event:
-			`event ProxyCreation(GnosisSafeProxy proxy, address singleton);`
-	*/
 	var result *contracts.GnosisSafeProxyFactoryProxyCreation
 	for _, log := range receipt.Logs {
 		result, _ = proxyFactory.ParseProxyCreation(*log)
@@ -28,6 +29,15 @@ func GetProxyCreationResult(proxyFactory *contracts.GnosisSafeProxyFactory, rece
 	}
 	return result.Proxy, nil
 }
+
+/*
+	Get the result of an `ExecTransaction` caòò from the receipt
+	The ParseExecutionFailure and ParseExecutionSuccess catch the following event:
+		`event ProxyCreation(GnosisSafeProxy proxy, address singleton);`
+*/
+// func GetSafeTxExecutionResultFromLogs(safeContract *contracts.GnosisSafe, receipt *types.Receipt) (bool, error) {
+
+// }
 
 func DeployMasterContract(
 	ethereumClient *eth.EthereumClient,

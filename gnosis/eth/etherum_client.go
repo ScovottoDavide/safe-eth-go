@@ -621,10 +621,10 @@ func (ethereumClient *EthereumClient) WaitTxConfirmed(hash common.Hash) <-chan b
 	ch := make(chan bool)
 	go func() {
 		for {
-			_, pending, err := ethereumClient.GetTransaction(hash.Hex())
-			if err != nil {
-				ch <- true
-			}
+			_, pending, _ := ethereumClient.GetTransaction(hash.Hex())
+			// if err != nil {
+			// 	ch <- true
+			// }
 			if !pending {
 				ch <- pending
 			}

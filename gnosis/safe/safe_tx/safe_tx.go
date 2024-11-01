@@ -228,7 +228,7 @@ func (safeTx *SafeTx) Call(senderAddr common.Address, txGas uint64) error {
 	if err != nil {
 		return err
 	}
-
+	fmt.Println(common.Bytes2Hex(safeTxRaw))
 	res, err := safeTx.EthereumClient.CallContract(
 		senderAddr,
 		&safeTx.To,
@@ -256,10 +256,10 @@ func (safeTx *SafeTx) Execute(
 	txGasPrice *big.Int, // Gas price of the external tx. If not, `gas_price` will be used
 	txNonce *big.Int, // Force nonce for `tx_sender`
 	eip1559Speed *network.TxSpeed, // If provided, use EIP1559 transaction
-) error {
+) (*types.Transaction, error) {
 	signer, err := bind.NewKeyedTransactorWithChainID(privateKey, big.NewInt(int64(safeTx.ChainId)))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var gasLimit uint64
 	if txGas == nil {
@@ -270,15 +270,25 @@ func (safeTx *SafeTx) Execute(
 	if eip1559Speed != nil && safeTx.EthereumClient.IsEip1559Supported() {
 		eip1559EstimateGas, err = safeTx.EthereumClient.EstimateFeeEip1559(*eip1559Speed)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		txGasPrice = nil
 	} else {
-		eip1559EstimateGas = nil
+		eip1559EstimateGas.GasFeeCap = nil
+		eip1559EstimateGas.GasTipCap = nil
 	}
 
-	safeTx.SafeContract.ExecTransaction(
+	if txNonce == nil {
+		nonce, err := safeTx.EthereumClient.GetNonceForAccount(signer.From, "latest")
+		if err != nil {
+			return nil, err
+		}
+		txNonce = big.NewInt(int64(nonce))
+	}
+
+	tx, err := safeTx.SafeContract.ExecTransaction(
 		&bind.TransactOpts{
+			From:      signer.From,
 			Signer:    signer.Signer,
 			Nonce:     txNonce,
 			GasLimit:  gasLimit,
@@ -301,7 +311,7 @@ func (safeTx *SafeTx) Execute(
 	// Set signatures empty after executing the tx. `Nonce` is increased even if it fails,
 	// so signatures are not valid anymore
 	safeTx.Signatures = nil
-	return nil
+	return tx, err
 }
 
 // Signs the Safe Transaction and adds (in order) the signature to the SafeTx::Signature byte array and updates
